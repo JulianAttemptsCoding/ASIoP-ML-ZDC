@@ -27,6 +27,9 @@ def main():
     ap.add_argument("--model", required=True)
     ap.add_argument("--particle", default="neutron")
     ap.add_argument("--out_dir", default="results/ml/eval")
+    ap.add_argument("--split", choices=["val", "all"], default="val",
+                    help="val = held-out 20%% (same seed as training; honest test)")
+    ap.add_argument("--val_frac", type=float, default=0.2)
     args = ap.parse_args()
 
     import torch
@@ -36,7 +39,16 @@ def main():
     clouds, masks, e_beam, pos = load_npz(args.data)
     clouds_n, _, _ = normalize(clouds, masks)
 
-    ckpt = torch.load(args.model, map_location="cpu")
+    # replicate the train/val split exactly (train.py: default_rng(0), val_frac)
+    if args.split == "val":
+        n = len(clouds_n)
+        idx = np.random.default_rng(0).permutation(n)
+        sel = idx[:int(args.val_frac * n)]
+        clouds_n, masks, e_beam, pos = clouds_n[sel], masks[sel], e_beam[sel], pos[sel]
+        print(f"evaluating on {len(sel)} held-out validation events")
+
+    # weights_only=False: checkpoint holds numpy feat_mean/std we wrote ourselves
+    ckpt = torch.load(args.model, map_location="cpu", weights_only=False)
     model = DeepSetsZDC()
     model.load_state_dict(ckpt["state_dict"])
     model.eval()
