@@ -92,15 +92,19 @@ python -m zdc.ml.dataset --particle both --max_hits 512     # ROOT -> results/ml
 # cloud:                       bash vertex/submit.sh        # see "Vertex AI status"
 ```
 
-### Vertex AI status — **not yet wired up**
+### Vertex AI status — **live, models trained**
 
-Heavy training runs on Vertex AI (project **ASIoP ZDC**). Before the first submit:
+Project **ASIoP ZDC** (`asiop-zdc`, us-central1), bucket `gs://asiop-zdc-uscentral1`,
+billing linked, APIs enabled. First neutron + gamma runs **SUCCEEDED** (n1-standard-16,
+50 epochs). Convergence + comparison in [`results/ML_RESULTS.md`](results/ML_RESULTS.md);
+models at `gs://asiop-zdc-uscentral1/runs/full_20260617_213548_<particle>/model.pt`.
 
-- [ ] `gcloud`/`gsutil` are **not installed locally** — install Google Cloud SDK, `gcloud auth login`
-- [ ] confirm project (a new `ASIoP ZDC`, or the existing `project-c779f701-…`) + bucket + enabled APIs
-- [ ] `vertex/submit.sh` builds the sdist, uploads `ml_<p>.npz`, and submits `zdc.vertex_entry`
+Per-energy ML resolution (apples-to-apples vs the traditional CSVs):
+`python -m zdc.ml.evaluate --data results/ml/ml_<p>.npz --model <model.pt> --particle <p>`
+(needs torch locally, or run as a Vertex job).
 
-Submission is billable/external → left for explicit go-ahead.
+gcloud was installed via winget to `~/AppData/Local/Google/Cloud SDK/...` (not on PATH;
+`vertex/submit.sh` adds it).
 
 ## To-do (from the talk, p.18)
 
