@@ -1,0 +1,14 @@
+*.root
+*.hdf5
+*.npz
+*.npy
+*.pkl.gz
+outputs/
+logs/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+*.egg-info/
+dist/
+build/
+.env
