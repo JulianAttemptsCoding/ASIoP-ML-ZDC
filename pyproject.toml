@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zdc"
+version = "0.1.0"
+description = "ZDC (LYSO ECAL + SiPM-on-tile HCAL) reconstruction: traditional + ML"
+requires-python = ">=3.10"
+# Vertex installs the package with --no-deps; runtime deps are pinned light in
+# vertex/entry.py to respect the prebuilt container ABI (numpy<2).
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["zdc*"]
+
+[tool.setuptools.package-dir]
+"" = "src"

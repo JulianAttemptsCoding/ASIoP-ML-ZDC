@@ -1,67 +1,110 @@
-# ML ZDC — GNN Reconstruction for Zero Degree Calorimeter
+# ASIoP ZDC — Reconstruction (Traditional + ML)
 
-Remake of arXiv:2406.12877v2 ("Design and Simulation of a SiPM-on-Tile ZDC for the future EIC, and its Performance with Graph Neural Networks") for an HEP lab experiment.
+Reconstruction software for the **Taiwan-group ZDC** (Academia Sinica, EIC-Asia):
+a Zero Degree Calorimeter = **LYSO-crystal ECAL + SiPM-on-tile HCAL**.
 
-Reference code: [eiccodesign/regressiononly @ zdc_classification](https://github.com/eiccodesign/regressiononly/tree/zdc_classification)  
-Reference ONNX models: [zenodo.11187659](https://doi.org/10.5281/zenodo.11187659)
+Goal (from lab supervisor Chia-Yu Hsieh): reproduce the **traditional** energy &
+position reconstruction from the 2026/05/01 status talk, then develop the **ML**
+method together. This repo does both.
 
-## Tasks
+- Task spec: `to2026Summer/20260501_ZDC_MC.pdf`
+- MC samples: `to2026Summer/20260421_gamma_LYSO_diffAngle/`, `…/20260324_neutron_LYSO_diffAngle/`
+- Background paper (different EIC ZDC, GNN reference): `reference paper.pdf` (arXiv:2406.12877v2)
 
-| Task | Output | Config |
-|------|--------|--------|
-| Single-neutron regression | E, θ | `a100_neutron.yaml` |
-| π⁰/γ classification + regression | E, θ, class | `a100_pi0_gamma.yaml` |
-| Multi-neutron energy | E_total | *(extend neutron config)* |
+## Detector & samples
 
-## Setup
+| | |
+|---|---|
+| ECAL | LYSO crystal, 20×20 cells, 3×3×7 cm³, 60×60 cm² |
+| HCAL | sampling (steel + scint tile + SiPM), 64 layers, ~24.9 mm pitch, 163 cm in z |
+| Beam | spread beam, 25° opening; gamma 0.1–40 GeV, neutron 10–300 GeV |
+| Format | EDM4hep/podio ROOT: `EcalFarForwardZDCHits`, `HcalFarForwardZDCHits`, `MCParticles` |
+| Files | one fixed beam energy per file, 1000 events; primary = first `generatorStatus==1` |
 
-```bash
-conda env create -f environment.yml
-conda activate ml-zdc
+ROOT files are **not** committed (1.6 GB). Unzip the supervisor's archive into
+`to2026Summer/` to reproduce.
+
+## Layout
+
+```
+src/zdc/
+  io.py           EDM4hep reader: per-event E_ECAL/E_HCAL, HCAL hits, truth; layer grouping
+  beam.py         filename -> beam energy (gamma in name; neutron index -> steering)
+  energy.py       energy regression: linear/ratio/quadratic x equal/sqrt weighting
+  crystalball.py  double-sided crystal ball fit -> resolution (sigma) & bias (mu)
+  position.py     HCAL track recon: layer-avg pos, pol1 fit, residual vs truth
+  ml/             phase 2: dataset.py (point clouds), model.py (DeepSets), train.py
+  vertex_entry.py Vertex AI custom-job entry (pip light -> gsutil pull -> train -> push)
+scripts/
+  build_features.py        ROOT -> results/features_<p>.npz  (energy scalars)
+  energy_resolution.py     reproduce energy resolution+bias -> results/energy_*.png/csv
+  position_resolution.py   reproduce position resolution+bias -> results/position_*.png/csv
+vertex/submit.sh           gcloud custom-job submission (phase 2)
+results/                   committed reproduction plots + CSV summaries
 ```
 
-## Quick start
-
-1. Set `data_dir` in your chosen config to point at your ROOT files.
-2. Set `detector_branch` to match your simulation output branch name.
-3. First run preprocesses ROOT → pickles (slow once, fast after):
+## Run the traditional reproduction
 
 ```bash
-python train.py --config configs/a100_neutron.yaml
+pip install -r requirements.txt
+export PYTHONPATH=src
+
+python scripts/build_features.py --particle both
+python scripts/energy_resolution.py --particle both
+python scripts/position_resolution.py --particle both          # all 64 layers, energy-and-hit weighting
 ```
 
-4. On A100 cluster:
+### Reproduced results (matches the status talk)
+
+**Energy** (E_rec = f(E_ECAL, E_HCAL), √E_beam weighting + ratio fn; DSCB fit of E_rec/E_beam):
+
+| beam | gamma σ/E | neutron σ/E |
+|---|---|---|
+| 1 GeV | 14.6 % | — |
+| 50 GeV | — | 7.6 % |
+| 300 GeV | — | 4.2 % (bias 1.03) |
+| 40 GeV | 3.2 % | — |
+
+→ gamma satisfies 20%/√E ⊕ 5%; neutron **fails < 50 GeV**, ~satisfies above — same
+conclusion as the talk.
+
+**Position** (HCAL only, energy-weighted layer x̄/ȳ, pol1, energy-and-hit weighting):
+
+| beam | neutron σ_x | gamma σ_x |
+|---|---|---|
+| 1 GeV | — | 13.3 mm |
+| 300 GeV | 8.7 mm | — |
+| 40 GeV | — | 2.3 mm |
+
+→ resolution improves with energy, ~mm-scale bias — matches the talk (neutron peak
+~6 mm, gamma peak ~5 mm; small offsets from reference-z and fit-window choices).
+
+## ML phase 2 (DeepSets, on Vertex AI)
+
+Each event → point cloud of hits `[log10 E, x, y, z, is_ecal]`; permutation-invariant
+DeepSets predicts E_beam and (x,y). Pure PyTorch (no graph lib) to match the Vertex
+`pytorch-xla` image.
 
 ```bash
-sbatch submit_a100.sh configs/a100_neutron.yaml
+export PYTHONPATH=src
+python -m zdc.ml.dataset --particle both --max_hits 512     # ROOT -> results/ml/ml_<p>.npz
+# local smoke (needs torch):   python -m zdc.ml.train --data results/ml/ml_neutron.npz --epochs 5
+# cloud:                       bash vertex/submit.sh        # see "Vertex AI status"
 ```
 
-5. After training, evaluate:
+### Vertex AI status — **not yet wired up**
 
-```bash
-python inference.py \
-  --config configs/a100_neutron.yaml \
-  --checkpoint outputs/a100_neutron/best_model
-```
+Heavy training runs on Vertex AI (project **ASIoP ZDC**). Before the first submit:
 
-## Key parameters (from paper)
+- [ ] `gcloud`/`gsutil` are **not installed locally** — install Google Cloud SDK, `gcloud auth login`
+- [ ] confirm project (a new `ASIoP ZDC`, or the existing `project-c779f701-…`) + bucket + enabled APIs
+- [ ] `vertex/submit.sh` builds the sdist, uploads `ml_<p>.npz`, and submits `zdc.vertex_entry`
 
-| Parameter | Value |
-|-----------|-------|
-| Sampling fraction | 2.1% |
-| Hit energy threshold | 0.5 MIP = 0.25 MeV |
-| Hit time cut | < 275 ns |
-| kNN neighbors | 10 |
-| Node features | log₁₀(E), x, y, z |
-| Architecture | 4 × Dense(64), ReLU, He-normal |
-| Batch size | 256 (paper) / 512 (A100 config) |
-| Optimizer | Adam, LR=1e-3, halved every 5 epochs |
-| Classification α | 0.75 |
+Submission is billable/external → left for explicit go-ahead.
 
-## TODO before first run
+## To-do (from the talk, p.18)
 
-- [ ] Set `data_dir` in configs
-- [ ] Confirm ROOT branch names from your simulation (`detector_branch`, `mc_branch`)
-- [ ] Confirm `tree_name` in `src/data/generator.py` matches your ROOT file structure
-- [ ] Set SLURM `--partition` and `--account` in `submit_a100.sh`
-- [ ] Install environment: `conda env create -f environment.yml`
+- HCAL geometry hexagonal → rectangular scintillator tile
+- evaluate with neutron/gamma/**lambda** gun across varying z-positions (Sullivan process, Λ→nπ⁰→n2γ)
+- WSi ECAL variant
+- GNN energy + track reconstruction (this repo's phase 2)

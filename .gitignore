@@ -1,14 +1,22 @@
+# MC data — large (1.6 GB), not committed
+to2026Summer/
+*.zip
 *.root
-*.hdf5
-*.npz
-*.npy
-*.pkl.gz
-outputs/
-logs/
+
+# generated artifacts
+results/**/*.npz
+results/ml/
+vertex/dist/
+
+# keep the reproduction plots + CSV summaries (small, useful as reference)
+!results/*.png
+!results/*.csv
+
+# python
 __pycache__/
 *.pyc
-.ipynb_checkpoints/
 *.egg-info/
-dist/
 build/
+dist/
+.ipynb_checkpoints/
 .env
