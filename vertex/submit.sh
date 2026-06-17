@@ -1,20 +1,21 @@
 #!/bin/bash
 # Submit a ZDC ML training job to Vertex AI (phase 2).
 #
-# Prereqs (NOT yet done — see README "Vertex AI status"):
-#   - install Google Cloud SDK (gcloud + gsutil); `gcloud auth login`
-#   - project + bucket exist; APIs enabled
-#   - build sdist + upload data first (see steps below)
+# Prereqs (DONE 2026-06-17): SDK installed, juliansjuan08@gmail.com authed,
+# project asiop-zdc created, billing linked, APIs enabled, bucket exists.
+#   Build sdist + upload data happen below.
 #
 # gcloud crashes if the OpenAI/Codex bin is on PATH ("untrusted mount point"):
 export PATH="$(echo "$PATH" | tr ':' '\n' | grep -vi Codex | paste -sd:)"
+# gcloud not on PATH on this Windows box — add the winget install location:
+export PATH="$PATH:/c/Users/Julia/AppData/Local/Google/Cloud SDK/google-cloud-sdk/bin"
 
 set -euo pipefail
 
-# ---- constants (edit to your project) -------------------------------------
-PROJECT="project-c779f701-1a49-4a58-b54"     # TODO: confirm / new "ASIoP ZDC"
+# ---- constants (project: ASIoP ZDC) ---------------------------------------
+PROJECT="asiop-zdc"
 REGION="us-central1"
-BUCKET="gs://gmda-vertex-c779f701-uscentral1"
+BUCKET="gs://asiop-zdc-uscentral1"
 IMAGE="us-docker.pkg.dev/vertex-ai/training/pytorch-xla.2-4.py310:latest"
 MACHINE="${MACHINE:-n1-standard-16}"          # n1-standard-4 for smoke
 PARTICLE="${PARTICLE:-neutron}"
