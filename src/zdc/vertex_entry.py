@@ -1,13 +1,13 @@
 """
-Vertex AI custom-job entry point (phase 2).
+Vertex AI custom-job entry point — ZDC particle finder.
 
 Pattern (per project Vertex notes):
   1. pip-install only light deps in-container (numpy<2 to respect the prebuilt ABI)
   2. gsutil-pull the dataset from --data_uri
-  3. train (zdc.ml.train)
+  3. train the classifier (zdc.ml.train)
   4. gsutil-push artifacts to --out_uri
 
-Invoked as:  python -m zdc.vertex_entry --data_uri=gs://... --out_uri=gs://... --epochs=50
+Invoked as:  python -m zdc.vertex_entry --data_uri=gs://... --out_uri=gs://... --epochs=40
 gcloud runs through the shell so .cmd shims resolve on Windows submitters.
 """
 
@@ -24,10 +24,10 @@ def sh(cmd):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data_uri", required=True, help="gs:// dir holding ml_<particle>.npz")
+    ap.add_argument("--data_uri", required=True, help="gs:// dir holding particles.npz")
     ap.add_argument("--out_uri", required=True, help="gs:// dir for model + metrics")
-    ap.add_argument("--particle", default="neutron")
-    ap.add_argument("--epochs", type=int, default=50)
+    ap.add_argument("--dataset", default="particles.npz")
+    ap.add_argument("--epochs", type=int, default=40)
     ap.add_argument("--batch_size", type=int, default=128)
     ap.add_argument("--lr", type=float, default=1e-3)
     args = ap.parse_args()
@@ -43,7 +43,7 @@ def main():
     # 3. train
     local_out = "/tmp/out"
     os.makedirs(local_out, exist_ok=True)
-    npz = os.path.join(local_data, f"ml_{args.particle}.npz")
+    npz = os.path.join(local_data, args.dataset)
     sh(f'{sys.executable} -m zdc.ml.train --data "{npz}" --out_dir "{local_out}" '
        f'--epochs {args.epochs} --batch_size {args.batch_size} --lr {args.lr}')
 

@@ -1,26 +1,21 @@
 """
-DeepSets regressor for ZDC reconstruction (phase 2), pure PyTorch.
+DeepSets classifier for the ZDC particle finder (pure PyTorch).
 
-Permutation-invariant over hits, so no graph library needed (works on the
-Vertex `pytorch-xla` image without torch-geometric). Two heads:
-    energy  -> E_beam [GeV]
-    position-> (x, y) at HCAL reference z [mm]
+Permutation-invariant over hits -> no graph library needed (runs on the Vertex
+`pytorch-xla` image without torch-geometric). One classification head over
+particle classes.
 
-Reference approach: eiccodesign/regressiononly (DeepSets), adapted to the
-LYSO-ECAL + HCAL point cloud of this detector.
+Swap-in path to a real message-passing GNN later: add kNN edges in the dataset
+and replace the sum-pool with edge-conditioned aggregation.
 """
 
 import torch
 import torch.nn as nn
 
 
-class DeepSetsZDC(nn.Module):
-    def __init__(self, in_dim=5, hidden=128, latent=256,
-                 predict_energy=True, predict_position=True):
+class DeepSetsClassifier(nn.Module):
+    def __init__(self, in_dim=5, hidden=128, latent=256, num_classes=2):
         super().__init__()
-        self.predict_energy = predict_energy
-        self.predict_position = predict_position
-
         self.phi = nn.Sequential(
             nn.Linear(in_dim, hidden), nn.ReLU(),
             nn.Linear(hidden, hidden), nn.ReLU(),
@@ -30,24 +25,16 @@ class DeepSetsZDC(nn.Module):
             nn.Linear(latent, hidden), nn.ReLU(),
             nn.Linear(hidden, hidden), nn.ReLU(),
         )
-        if predict_energy:
-            self.energy_head = nn.Linear(hidden, 1)
-        if predict_position:
-            self.position_head = nn.Linear(hidden, 2)
+        self.head = nn.Linear(hidden, num_classes)
 
     def forward(self, x, mask):
         """
         x    : (B, N, in_dim) padded hit features
         mask : (B, N) 1 for real hits, 0 for padding
+        returns logits (B, num_classes)
         """
-        h = self.phi(x)                          # (B, N, latent)
-        h = h * mask.unsqueeze(-1)               # zero padded hits
-        pooled = h.sum(dim=1)                    # permutation-invariant sum
-        g = self.rho(pooled)                     # (B, hidden)
-
-        out = {}
-        if self.predict_energy:
-            out["energy"] = self.energy_head(g).squeeze(-1)
-        if self.predict_position:
-            out["position"] = self.position_head(g)
-        return out
+        h = self.phi(x)
+        h = h * mask.unsqueeze(-1)        # zero padded hits
+        pooled = h.sum(dim=1)             # permutation-invariant aggregation
+        g = self.rho(pooled)
+        return self.head(g)

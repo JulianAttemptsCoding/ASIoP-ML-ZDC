@@ -1,12 +1,16 @@
 """
-Build ML datasets from the ZDC ROOT files (phase 2).
+Build the ML dataset for the ZDC particle finder.
 
-Each event becomes a variable-length point cloud of calorimeter hits:
+Each event -> a point cloud of calorimeter hits with a particle-type LABEL.
     node features = [log10(E), x, y, z, is_ecal]
-    targets       = E_beam [GeV], (x_true, y_true) at HCAL reference z
+    label         = particle class (0=gamma, 1=neutron, extensible)
 
-Saved as a padded .npz (point clouds + mask + targets) so the Vertex container
-needs no ROOT/uproot — only numpy. Heavy ROOT reading happens here, locally.
+Heavy ROOT reading happens here (local); the padded .npz that lands in the
+Vertex container needs only numpy.
+
+TODO (define the "particle finder" task):
+  - which classes? gamma vs neutron now; add pi0, lambda-decay (n+2gamma), noise...
+  - per-event single label (ID) vs multi-object finding/counting (later)
 """
 
 import argparse
@@ -18,18 +22,15 @@ import numpy as np
 import uproot
 import awkward as ak
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
-from zdc.io import ECAL, HCAL, _primary_index
-from zdc.beam import beam_energy
+from zdc.io import ECAL, HCAL
 
-DATA = {
-    "gamma":   "20260421_gamma_LYSO_diffAngle",
-    "neutron": "20260324_neutron_LYSO_diffAngle",
+# particle -> (sample folder, class label)
+SAMPLES = {
+    "gamma":   ("20260421_gamma_LYSO_diffAngle", 0),
+    "neutron": ("20260324_neutron_LYSO_diffAngle", 1),
 }
-
-# reference plane for the position target: front face of HCAL region [mm]
-Z_REF_MM = 35822.0
+CLASS_NAMES = ["gamma", "neutron"]
 
 
 def _event_pointcloud(a, i):
@@ -49,68 +50,51 @@ def _event_pointcloud(a, i):
     return np.concatenate(feats, axis=0)
 
 
-def build(particle, data_root, max_hits, out_dir):
-    folder = os.path.join(data_root, DATA[particle])
-    files = sorted(glob.glob(os.path.join(folder, "outfile_*.root")))
+def build(data_root, max_hits, out_path):
+    clouds, masks, labels = [], [], []
 
-    clouds, masks, e_targets, pos_targets = [], [], [], []
-    for path in files:
-        ebeam = beam_energy(path, particle)
-        t = uproot.open(path)["events"]
-        a = t.arrays([
-            f"{ECAL}.energy", f"{ECAL}.position.x", f"{ECAL}.position.y", f"{ECAL}.position.z",
-            f"{HCAL}.energy", f"{HCAL}.position.x", f"{HCAL}.position.y", f"{HCAL}.position.z",
-            "MCParticles.generatorStatus",
-            "MCParticles.vertex.x", "MCParticles.vertex.y", "MCParticles.vertex.z",
-            "MCParticles.momentum.x", "MCParticles.momentum.y", "MCParticles.momentum.z",
-        ])
-        n = len(a[f"{ECAL}.energy"])
-        for i in range(n):
-            pc = _event_pointcloud(a, i)
-            if len(pc) == 0:
-                continue
-            # keep highest-energy hits if over budget
-            if len(pc) > max_hits:
-                keep = np.argsort(pc[:, 0])[-max_hits:]
-                pc = pc[keep]
-            padded = np.zeros((max_hits, 5), dtype=np.float32)
-            mask = np.zeros(max_hits, dtype=np.float32)
-            padded[:len(pc)] = pc
-            mask[:len(pc)] = 1.0
+    for particle, (folder, label) in SAMPLES.items():
+        files = sorted(glob.glob(os.path.join(data_root, folder, "outfile_*.root")))
+        if not files:
+            print(f"  WARNING: no files for {particle} in {folder}")
+            continue
+        for path in files:
+            t = uproot.open(path)["events"]
+            a = t.arrays([
+                f"{ECAL}.energy", f"{ECAL}.position.x", f"{ECAL}.position.y", f"{ECAL}.position.z",
+                f"{HCAL}.energy", f"{HCAL}.position.x", f"{HCAL}.position.y", f"{HCAL}.position.z",
+            ])
+            for i in range(len(a[f"{ECAL}.energy"])):
+                pc = _event_pointcloud(a, i)
+                if len(pc) == 0:
+                    continue
+                if len(pc) > max_hits:                       # keep highest-energy hits
+                    pc = pc[np.argsort(pc[:, 0])[-max_hits:]]
+                padded = np.zeros((max_hits, 5), dtype=np.float32)
+                mask = np.zeros(max_hits, dtype=np.float32)
+                padded[:len(pc)] = pc
+                mask[:len(pc)] = 1.0
+                clouds.append(padded); masks.append(mask); labels.append(label)
+        print(f"  {particle:8s} (label {label}): cum events={len(clouds)}")
 
-            j = _primary_index(a["MCParticles.generatorStatus"][i])
-            vx, vy, vz = (a["MCParticles.vertex.x"][i][j], a["MCParticles.vertex.y"][i][j], a["MCParticles.vertex.z"][i][j])
-            px, py, pz = (a["MCParticles.momentum.x"][i][j], a["MCParticles.momentum.y"][i][j], a["MCParticles.momentum.z"][i][j])
-            xt = vx + (px / pz) * (Z_REF_MM - vz) if pz else vx
-            yt = vy + (py / pz) * (Z_REF_MM - vz) if pz else vy
-
-            clouds.append(padded); masks.append(mask)
-            e_targets.append(ebeam); pos_targets.append([xt, yt])
-
-        print(f"  {os.path.basename(path):35s} E={ebeam:7.2f}  cum events={len(clouds)}")
-
-    out = os.path.join(out_dir, f"ml_{particle}.npz")
-    os.makedirs(out_dir, exist_ok=True)
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
     np.savez_compressed(
-        out,
+        out_path,
         clouds=np.asarray(clouds, dtype=np.float32),
         masks=np.asarray(masks, dtype=np.float32),
-        e_beam=np.asarray(e_targets, dtype=np.float32),
-        pos=np.asarray(pos_targets, dtype=np.float32),
-        particle=particle,
+        labels=np.asarray(labels, dtype=np.int64),
+        class_names=np.asarray(CLASS_NAMES),
     )
-    print(f"-> saved {out}  ({len(clouds)} events, max_hits={max_hits})")
+    lab = np.asarray(labels)
+    print(f"-> saved {out_path}  ({len(clouds)} events, "
+          f"classes={ {n: int((lab==i).sum()) for i,n in enumerate(CLASS_NAMES)} })")
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--data_root", default="to2026Summer")
-    ap.add_argument("--particle", choices=["gamma", "neutron", "both"], default="both")
     ap.add_argument("--max_hits", type=int, default=512)
-    ap.add_argument("--out_dir", default="results/ml")
+    ap.add_argument("--out", default="results/ml/particles.npz")
     args = ap.parse_args()
-
-    targets = ["gamma", "neutron"] if args.particle == "both" else [args.particle]
-    for p in targets:
-        print(f"=== build ML dataset: {p} ===")
-        build(p, args.data_root, args.max_hits, args.out_dir)
+    print("=== build ZDC particle-finder dataset ===")
+    build(args.data_root, args.max_hits, args.out)

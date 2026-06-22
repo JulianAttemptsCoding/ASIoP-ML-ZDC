@@ -1,5 +1,5 @@
 #!/bin/bash
-# Submit a ZDC ML training job to Vertex AI (phase 2).
+# Submit a ZDC particle-finder training job to Vertex AI.
 #
 # Prereqs (DONE 2026-06-17): SDK installed, juliansjuan08@gmail.com authed,
 # project asiop-zdc created, billing linked, APIs enabled, bucket exists.
@@ -18,9 +18,9 @@ REGION="us-central1"
 BUCKET="gs://asiop-zdc-uscentral1"
 IMAGE="us-docker.pkg.dev/vertex-ai/training/pytorch-xla.2-4.py310:latest"
 MACHINE="${MACHINE:-n1-standard-16}"          # n1-standard-4 for smoke
-PARTICLE="${PARTICLE:-neutron}"
-EPOCHS="${EPOCHS:-50}"
-RID="$(date +%Y%m%d_%H%M%S)_${PARTICLE}"
+DATASET="${DATASET:-particles.npz}"
+EPOCHS="${EPOCHS:-40}"
+RID="$(date +%Y%m%d_%H%M%S)_finder"
 
 # ---- 1. build + upload package --------------------------------------------
 python -m build --sdist --outdir vertex/dist .
@@ -28,7 +28,7 @@ gsutil -q -m cp vertex/dist/*.tar.gz "${BUCKET}/packages/"
 PKG="$(ls -t vertex/dist/*.tar.gz | head -1 | xargs basename)"
 
 # ---- 2. upload dataset (built locally by zdc.ml.dataset) ------------------
-gsutil -q -m cp "results/ml/ml_${PARTICLE}.npz" "${BUCKET}/repo_inputs/zdc/"
+gsutil -q -m cp "results/ml/${DATASET}" "${BUCKET}/repo_inputs/zdc/"
 
 # ---- 3. submit -------------------------------------------------------------
 gcloud ai custom-jobs create \
@@ -36,7 +36,7 @@ gcloud ai custom-jobs create \
   --display-name="zdc_${RID}" \
   --python-package-uris="${BUCKET}/packages/${PKG}" \
   --worker-pool-spec="machine-type=${MACHINE},replica-count=1,executor-image-uri=${IMAGE},python-module=zdc.vertex_entry" \
-  --args="--data_uri=${BUCKET}/repo_inputs/zdc,--out_uri=${BUCKET}/runs/${RID},--particle=${PARTICLE},--epochs=${EPOCHS}"
+  --args="--data_uri=${BUCKET}/repo_inputs/zdc,--out_uri=${BUCKET}/runs/${RID},--dataset=${DATASET},--epochs=${EPOCHS}"
 
 echo "submitted zdc_${RID}; poll with:"
 echo "  gcloud ai custom-jobs list --region=${REGION} --project=${PROJECT} --filter='displayName:zdc_*' --format='table(displayName,state)'"
