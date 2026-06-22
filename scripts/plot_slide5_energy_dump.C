@@ -1,38 +1,20 @@
-// plot_slide5_energy_dump.C
-// Reproduces slide 5: Energy Dump scatter plots
-// Top row: 1-40 GeV Gamma   Bottom row: 20-300 GeV Neutron
-// Uses TProfile objects from c_Eorg canvas (pads 4,5,6)
+// plot_slide5_energy_dump.C — slide 5: energy dump scatter plots
+// TProfile ECal/HCal/All vs beam energy, top row gamma, bottom row neutron
 // Output: plots/slide5_energy_dump.png + plots/energy_reconstruction.root
-// Usage: root -b -q scripts/plot_slide5_energy_dump.C
-
-void setStyle() {
-    gStyle->SetOptStat(0);
-    gStyle->SetPadGridX(1);
-    gStyle->SetPadGridY(1);
-    gStyle->SetPadTickX(1);
-    gStyle->SetPadTickY(1);
-    gStyle->SetTitleFontSize(0.06);
-    gStyle->SetLabelSize(0.05,"xyz");
-    gStyle->SetTitleSize(0.055,"xyz");
-}
 
 TProfile* getProfile(TFile *f, const char* canvName, int padIdx) {
-    // padIdx: 0-based index into canvas pad list
     TCanvas *c = (TCanvas*)f->Get(canvName);
-    if (!c) { printf("[ERROR] Canvas %s not found\n", canvName); return nullptr; }
-    TList *prims = c->GetListOfPrimitives();
+    if (!c) return nullptr;
     int cnt = 0;
-    TIter it(prims);
+    TIter it(c->GetListOfPrimitives());
     TObject *obj;
     while ((obj = it())) {
         if (obj->InheritsFrom("TPad")) {
             if (cnt == padIdx) {
-                TPad *pad = (TPad*)obj;
-                TIter it2(pad->GetListOfPrimitives());
+                TIter it2(((TPad*)obj)->GetListOfPrimitives());
                 TObject *o2;
-                while ((o2 = it2())) {
+                while ((o2 = it2()))
                     if (o2->InheritsFrom("TProfile")) return (TProfile*)o2;
-                }
             }
             cnt++;
         }
@@ -45,24 +27,39 @@ void styleProfile(TProfile *p, int color, const char* ytitle, const char* title)
     p->SetMarkerStyle(kOpenCircle);
     p->SetMarkerColor(color);
     p->SetLineColor(color);
-    p->SetMarkerSize(1.0);
+    p->SetMarkerSize(1.2);
     p->GetYaxis()->SetTitle(ytitle);
-    p->GetXaxis()->SetTitle("Beam (GeV)");
-    p->GetXaxis()->SetTitleOffset(1.1);
-    p->GetYaxis()->SetTitleOffset(1.3);
+    p->GetXaxis()->SetTitle("Beam Energy (GeV)");
+    p->GetXaxis()->SetTitleSize(0.055);
+    p->GetYaxis()->SetTitleSize(0.055);
+    p->GetXaxis()->SetLabelSize(0.050);
+    p->GetYaxis()->SetLabelSize(0.050);
+    p->GetXaxis()->SetTitleOffset(1.05);
+    p->GetYaxis()->SetTitleOffset(1.30);
+    p->GetYaxis()->SetMaxDigits(3);
+}
+
+void setupPad() {
+    gPad->SetLeftMargin(0.17);
+    gPad->SetBottomMargin(0.15);
+    gPad->SetRightMargin(0.03);
+    gPad->SetTopMargin(0.11);
+    gPad->SetTicks(1,1);
 }
 
 void plot_slide5_energy_dump() {
-    setStyle();
+    gStyle->SetOptStat(0);
+    gStyle->SetPadGridX(1);
+    gStyle->SetPadGridY(1);
+    gStyle->SetTitleFontSize(0.07);
+
     const char* base = "/mnt/c/Users/Julia/OneDrive/Desktop/coding/ASIoP/Explore MC-sim data for ZDC";
 
-    TFile *fg = TFile::Open(TString::Format("%s/20260421_gamma_LYSO_diffAngle/res2_1_m0_w0_gamma.root", base));
+    TFile *fg = TFile::Open(TString::Format("%s/20260421_gamma_LYSO_diffAngle/res2_1_m0_w0_gamma.root",   base));
     TFile *fn = TFile::Open(TString::Format("%s/20260324_neutron_LYSO_diffAngle/res2_1_m0_w0_neutron.root", base));
-    if (!fg || fg->IsZombie() || !fn || fn->IsZombie()) {
-        printf("[ERROR] Cannot open input files\n"); return;
-    }
+    if (!fg || fg->IsZombie() || !fn || fn->IsZombie()) { printf("[ERROR] Cannot open files\n"); return; }
 
-    // Extract TProfile objects — pads 3,4,5 (0-indexed) = ECAL, HCAL, All
+    // Pads 3,4,5 (0-indexed) are the TProfile objects for ECal, HCal, All
     TProfile *gEcal = getProfile(fg, "c_Eorg", 3);
     TProfile *gHcal = getProfile(fg, "c_Eorg", 4);
     TProfile *gAll  = getProfile(fg, "c_Eorg", 5);
@@ -70,62 +67,41 @@ void plot_slide5_energy_dump() {
     TProfile *nHcal = getProfile(fn, "c_Eorg", 4);
     TProfile *nAll  = getProfile(fn, "c_Eorg", 5);
 
-    if (!gEcal || !gHcal || !gAll || !nEcal || !nHcal || !nAll) {
-        printf("[ERROR] Missing TProfile objects — check pad indices\n");
-        fg->Close(); fn->Close(); return;
+    if (!gEcal||!gHcal||!gAll||!nEcal||!nHcal||!nAll) {
+        printf("[ERROR] Missing TProfile objects\n"); fg->Close(); fn->Close(); return;
     }
 
-    int col = kBlue+1;
-    styleProfile(gEcal, col, "ECal / Beam", "Gamma: Beam VS ECAL/Beam");
-    styleProfile(gHcal, col, "HCal / Beam", "Gamma: Beam VS HCAL/Beam");
-    styleProfile(gAll,  col, "(ECal+HCal) / Beam", "Gamma: Beam VS (ECAL+HCAL)/Beam");
-    styleProfile(nEcal, kRed+1, "ECal / Beam", "Neutron: Beam VS ECAL/Beam");
-    styleProfile(nHcal, kRed+1, "HCal / Beam", "Neutron: Beam VS HCAL/Beam");
-    styleProfile(nAll,  kRed+1, "(ECal+HCal) / Beam", "Neutron: Beam VS (ECAL+HCAL)/Beam");
+    int gc = kBlue+1, nc = kRed+1;
+    styleProfile(gEcal, gc, "E_{ECAL} / E_{beam}", "Gamma (0.7-40 GeV):  E_{ECAL} / E_{beam}");
+    styleProfile(gHcal, gc, "E_{HCAL} / E_{beam}", "Gamma:  E_{HCAL} / E_{beam}");
+    styleProfile(gAll,  gc, "(E_{ECAL}+E_{HCAL}) / E_{beam}", "Gamma:  (E_{ECAL}+E_{HCAL}) / E_{beam}");
+    styleProfile(nEcal, nc, "E_{ECAL} / E_{beam}", "Neutron (20-300 GeV):  E_{ECAL} / E_{beam}");
+    styleProfile(nHcal, nc, "E_{HCAL} / E_{beam}", "Neutron:  E_{HCAL} / E_{beam}");
+    styleProfile(nAll,  nc, "(E_{ECAL}+E_{HCAL}) / E_{beam}", "Neutron:  (E_{ECAL}+E_{HCAL}) / E_{beam}");
 
-    // Fix y-ranges to match slide
+    // Set y-ranges
     gEcal->GetYaxis()->SetRangeUser(0.0, 0.65);
-    gHcal->GetYaxis()->SetRangeUser(0.0, 0.020);
-    gAll->GetYaxis()->SetRangeUser(0.0, 0.65);
-    nEcal->GetYaxis()->SetRangeUser(0.0, 0.06);
-    nHcal->GetYaxis()->SetRangeUser(0.0, 0.020);
-    nAll->GetYaxis()->SetRangeUser(0.0, 0.06);
+    gHcal->GetYaxis()->SetRangeUser(0.0, 0.021);
+    gAll ->GetYaxis()->SetRangeUser(0.0, 0.65);
+    nEcal->GetYaxis()->SetRangeUser(0.0, 0.060);
+    nHcal->GetYaxis()->SetRangeUser(0.0, 0.021);
+    nAll ->GetYaxis()->SetRangeUser(0.0, 0.060);
 
     TCanvas *c = new TCanvas("c_slide5","Energy Dump",2700,1500);
     c->Divide(3, 2, 0.003, 0.003);
 
-    auto setupPad = [](TVirtualPad *p) {
-        p->SetLeftMargin(0.18); p->SetBottomMargin(0.15);
-        p->SetRightMargin(0.03); p->SetTopMargin(0.10);
-        p->SetTicks(1,1);
-    };
+    c->cd(1); setupPad(); gEcal->Draw("P E1");
+    c->cd(2); setupPad(); gHcal->Draw("P E1");
+    c->cd(3); setupPad(); gAll->Draw("P E1");
+    c->cd(4); setupPad(); nEcal->Draw("P E1");
+    c->cd(5); setupPad(); nHcal->Draw("P E1");
+    c->cd(6); setupPad(); nAll->Draw("P E1");
 
-    c->cd(1); setupPad(gPad); gEcal->Draw("P E1");
-    c->cd(2); setupPad(gPad); gHcal->Draw("P E1");
-    c->cd(3); setupPad(gPad); gAll->Draw("P E1");
-    c->cd(4); setupPad(gPad); nEcal->Draw("P E1");
-    c->cd(5); setupPad(gPad); nHcal->Draw("P E1");
-    c->cd(6); setupPad(gPad); nAll->Draw("P E1");
-
-    // Row labels: bottom-right INSIDE data frame (above bottom margin=0.15)
-    auto makeRowLabel = [](const char* text, int color) {
-        TPaveText *pt = new TPaveText(0.52, 0.17, 0.97, 0.27, "NDC");
-        pt->SetFillColor(0); pt->SetBorderSize(1);
-        pt->SetTextColor(color); pt->SetTextSize(0.060);
-        pt->SetTextFont(62);
-        pt->AddText(text);
-        return pt;
-    };
-    c->cd(1); makeRowLabel("1 - 40 GeV  Gamma", kBlue+1)->Draw();
-    c->cd(4); makeRowLabel("20 - 300 GeV  Neutron", kRed+1)->Draw();
 
     c->SaveAs(TString::Format("%s/plots/slide5_energy_dump.png", base));
 
-    // Write to TBrowser-friendly output file
     TFile *out = TFile::Open(TString::Format("%s/plots/energy_reconstruction.root", base), "UPDATE");
-    out->cd();
-    c->Write("slide5_energy_dump");
-    out->Close();
+    out->cd(); c->Write("slide5_energy_dump"); out->Close();
 
     fg->Close(); fn->Close();
     printf("[OK] slide5_energy_dump.png saved\n");

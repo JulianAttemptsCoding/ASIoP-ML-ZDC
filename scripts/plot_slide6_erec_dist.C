@@ -1,8 +1,6 @@
-// plot_slide6_erec_dist.C
-// Reproduces slide 6: E_rec/E_beam distribution for 1 GeV gamma
-// hERatioIndv_dcb[2] = 1 GeV gamma (confirmed by TLatex inspection)
-// Uses res2_1_m0_w1_gamma.root (linear method, sqrt-Ebeam weighting = best)
-// Output: plots/slide6_erec_dist.png + written to plots/energy_reconstruction.root
+// plot_slide6_erec_dist.C — slide 6: E_rec/E_beam distribution, 1 GeV gamma
+// hERatioIndv_dcb[2] = 1.00 GeV gamma, linear method (m0), sqrt-E weighting (w1)
+// Output: plots/slide6_erec_dist.png + plots/energy_reconstruction.root
 
 void plot_slide6_erec_dist() {
     gStyle->SetOptStat(0);
@@ -13,10 +11,10 @@ void plot_slide6_erec_dist() {
     TFile *f = TFile::Open(TString::Format("%s/20260421_gamma_LYSO_diffAngle/res2_1_m0_w1_gamma.root", base));
     if (!f || f->IsZombie()) { printf("[ERROR] Cannot open gamma file\n"); return; }
 
-    // Navigate c_Erec_dcb canvas -> pad index 2 (0-based) -> hERatioIndv_dcb[2]
     TCanvas *csrc = (TCanvas*)f->Get("c_Erec_dcb");
     if (!csrc) { printf("[ERROR] c_Erec_dcb not found\n"); f->Close(); return; }
 
+    // Walk pads, find index 2 (0-based) = 1 GeV gamma
     TList *prims = csrc->GetListOfPrimitives();
     TIter it(prims);
     TObject *obj;
@@ -32,12 +30,11 @@ void plot_slide6_erec_dist() {
             while ((o2 = it2())) {
                 if (o2->InheritsFrom("TH1")) h = (TH1D*)o2;
                 if (TString(o2->ClassName()) == "TLatex") {
-                    TLatex *lx = (TLatex*)o2;
-                    TString s = lx->GetTitle();
-                    if (s.Contains("BeamE"))  beamE = s;
-                    if (s.Contains("Mean"))   mean  = s;
-                    if (s.Contains("Sigma"))  sigma = s;
-                    if (s.Contains("Chi2"))   chi2  = s;
+                    TString s = ((TLatex*)o2)->GetTitle();
+                    if (s.Contains("BeamE")) beamE = s;
+                    if (s.Contains("Mean"))  mean  = s;
+                    if (s.Contains("Sigma")) sigma = s;
+                    if (s.Contains("Chi2"))  chi2  = s;
                 }
             }
             break;
@@ -45,14 +42,14 @@ void plot_slide6_erec_dist() {
         if (obj->InheritsFrom("TPad")) padIdx++;
     }
 
-    if (!h) { printf("[ERROR] hERatioIndv_dcb[2] not found in pad\n"); f->Close(); return; }
-    printf("[INFO] Found histogram: %s  entries=%.0f\n", h->GetName(), h->GetEntries());
+    if (!h) { printf("[ERROR] histogram not found in pad 2\n"); f->Close(); return; }
+    printf("[INFO] histogram: %s  entries=%.0f\n", h->GetName(), h->GetEntries());
 
     TCanvas *c = new TCanvas("c_slide6","E_rec/E_beam Distribution",1600,1200);
     c->SetLeftMargin(0.14);
     c->SetBottomMargin(0.13);
-    c->SetRightMargin(0.04);
-    c->SetTopMargin(0.06);
+    c->SetRightMargin(0.05);
+    c->SetTopMargin(0.08);
 
     h->SetLineColor(kBlack);
     h->SetFillColor(kWhite);
@@ -68,47 +65,37 @@ void plot_slide6_erec_dist() {
     h->SetTitle("");
     h->Draw("HIST");
 
-    // Draw any stored fit functions (DCB fit stored in histogram's function list)
+    // Draw stored DCB fit (red curve)
     TList *fns = h->GetListOfFunctions();
     if (fns && fns->GetSize() > 0) {
-        printf("[INFO] Found %d fit function(s) in histogram\n", fns->GetSize());
         TIter itf(fns);
         TObject *fn;
         while ((fn = itf())) {
             if (fn->InheritsFrom("TF1")) {
                 TF1 *f1 = (TF1*)fn;
-                f1->SetLineColor(kRed);
-                f1->SetLineWidth(2);
+                f1->SetLineColor(kRed); f1->SetLineWidth(3);
                 f1->Draw("same");
             }
         }
-    } else {
-        printf("[WARN] No fit function stored in histogram — drawing histogram only\n");
+        printf("[INFO] fit function drawn\n");
     }
 
-    // Add info labels (from stored TLatex strings)
-    double x0 = 0.55, y0 = 0.82, dy = 0.07;
-    auto addLabel = [&](TString s, double y) {
-        if (s.IsNull()) return;
-        TLatex *lx = new TLatex(x0, y, s);
-        lx->SetNDC(); lx->SetTextSize(0.04); lx->Draw();
-    };
-    addLabel(beamE, y0);
-    addLabel(mean,  y0 - dy);
-    addLabel(sigma, y0 - 2*dy);
-    addLabel(chi2,  y0 - 3*dy);
-
-    // Box around labels
-    TPaveText *box = new TPaveText(x0-0.01, y0-3.5*dy, 0.98, y0+0.04, "NDC");
-    box->SetFillStyle(0); box->SetBorderSize(1);
+    // Stats box in RIGHT tail region — histogram very sparse at x > 1.3 GeV
+    // peak at x~1.0, tail counts ~0-10 at x>1.4; box above the sparse bars
+    double x0=0.64, y0=0.88, dy=0.085;
+    TPaveText *box = new TPaveText(x0, y0-3.8*dy, 0.99, y0+0.03, "NDC");
+    box->SetFillColor(0); box->SetBorderSize(1); box->SetTextAlign(12);
+    box->SetTextSize(0.042); box->SetTextFont(42);
+    if (!beamE.IsNull()) box->AddText(beamE);
+    if (!mean.IsNull())  box->AddText(mean);
+    if (!sigma.IsNull()) box->AddText(sigma);
+    if (!chi2.IsNull())  box->AddText(chi2);
     box->Draw();
 
     c->SaveAs(TString::Format("%s/plots/slide6_erec_dist.png", base));
 
     TFile *out = TFile::Open(TString::Format("%s/plots/energy_reconstruction.root", base), "UPDATE");
-    out->cd();
-    c->Write("slide6_erec_dist");
-    out->Close();
+    out->cd(); c->Write("slide6_erec_dist"); out->Close();
 
     f->Close();
     printf("[OK] slide6_erec_dist.png saved\n");
