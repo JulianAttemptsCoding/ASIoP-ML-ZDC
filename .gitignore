@@ -1,0 +1,10 @@
+# Raw Geant4 simulation output — too large for GitHub LFS free tier (up to 446 MB per file)
+# Store locally only; regenerate from steering_*.py if needed
+outfile_*.root
+
+# Unix NFS lock files
+.nfs*
+
+# Python cache
+__pycache__/
+*.pyc
