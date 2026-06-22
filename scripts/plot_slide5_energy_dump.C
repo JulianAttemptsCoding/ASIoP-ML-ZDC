@@ -91,34 +91,33 @@ void plot_slide5_energy_dump() {
     nHcal->GetYaxis()->SetRangeUser(0.0, 0.020);
     nAll->GetYaxis()->SetRangeUser(0.0, 0.06);
 
-    TCanvas *c = new TCanvas("c_slide5","Energy Dump",1800,1000);
-    c->Divide(3, 2, 0.005, 0.005);
+    TCanvas *c = new TCanvas("c_slide5","Energy Dump",2700,1500);
+    c->Divide(3, 2, 0.003, 0.003);
 
-    c->cd(1); gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.14);
-    gEcal->Draw("P E1"); gPad->SetTicks(1,1);
+    auto setupPad = [](TVirtualPad *p) {
+        p->SetLeftMargin(0.18); p->SetBottomMargin(0.15);
+        p->SetRightMargin(0.03); p->SetTopMargin(0.10);
+        p->SetTicks(1,1);
+    };
 
-    c->cd(2); gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.14);
-    gHcal->Draw("P E1");
+    c->cd(1); setupPad(gPad); gEcal->Draw("P E1");
+    c->cd(2); setupPad(gPad); gHcal->Draw("P E1");
+    c->cd(3); setupPad(gPad); gAll->Draw("P E1");
+    c->cd(4); setupPad(gPad); nEcal->Draw("P E1");
+    c->cd(5); setupPad(gPad); nHcal->Draw("P E1");
+    c->cd(6); setupPad(gPad); nAll->Draw("P E1");
 
-    c->cd(3); gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.14);
-    gAll->Draw("P E1");
-
-    c->cd(4); gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.14);
-    nEcal->Draw("P E1");
-
-    c->cd(5); gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.14);
-    nHcal->Draw("P E1");
-
-    c->cd(6); gPad->SetLeftMargin(0.16); gPad->SetBottomMargin(0.14);
-    nAll->Draw("P E1");
-
-    // Row labels
-    c->cd(1);
-    TLatex *ltg = new TLatex(0.18, 0.85, "1 - 40 GeV Gamma");
-    ltg->SetNDC(); ltg->SetTextSize(0.055); ltg->SetTextColor(kBlue+1); ltg->Draw();
-    c->cd(4);
-    TLatex *ltn = new TLatex(0.18, 0.85, "20 - 300 GeV Neutron");
-    ltn->SetNDC(); ltn->SetTextSize(0.055); ltn->SetTextColor(kRed+1); ltn->Draw();
+    // Row labels: bottom-right INSIDE data frame (above bottom margin=0.15)
+    auto makeRowLabel = [](const char* text, int color) {
+        TPaveText *pt = new TPaveText(0.52, 0.17, 0.97, 0.27, "NDC");
+        pt->SetFillColor(0); pt->SetBorderSize(1);
+        pt->SetTextColor(color); pt->SetTextSize(0.060);
+        pt->SetTextFont(62);
+        pt->AddText(text);
+        return pt;
+    };
+    c->cd(1); makeRowLabel("1 - 40 GeV  Gamma", kBlue+1)->Draw();
+    c->cd(4); makeRowLabel("20 - 300 GeV  Neutron", kRed+1)->Draw();
 
     c->SaveAs(TString::Format("%s/plots/slide5_energy_dump.png", base));
 

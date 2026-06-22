@@ -48,17 +48,23 @@ void plot_slide6_erec_dist() {
     if (!h) { printf("[ERROR] hERatioIndv_dcb[2] not found in pad\n"); f->Close(); return; }
     printf("[INFO] Found histogram: %s  entries=%.0f\n", h->GetName(), h->GetEntries());
 
-    TCanvas *c = new TCanvas("c_slide6","E_rec/E_beam Distribution",700,600);
-    c->SetLeftMargin(0.12);
-    c->SetBottomMargin(0.12);
+    TCanvas *c = new TCanvas("c_slide6","E_rec/E_beam Distribution",1600,1200);
+    c->SetLeftMargin(0.14);
+    c->SetBottomMargin(0.13);
+    c->SetRightMargin(0.04);
+    c->SetTopMargin(0.06);
 
     h->SetLineColor(kBlack);
     h->SetFillColor(kWhite);
     h->GetXaxis()->SetTitle("E_{rec} / E_{beam}");
-    h->GetYaxis()->SetTitle("Count");
+    h->GetYaxis()->SetTitle("Counts");
     h->GetXaxis()->SetRangeUser(0.0, 2.0);
-    h->GetXaxis()->SetTitleSize(0.05);
-    h->GetYaxis()->SetTitleSize(0.05);
+    h->GetXaxis()->SetTitleSize(0.052);
+    h->GetYaxis()->SetTitleSize(0.052);
+    h->GetXaxis()->SetLabelSize(0.048);
+    h->GetYaxis()->SetLabelSize(0.048);
+    h->GetXaxis()->SetTitleOffset(1.05);
+    h->GetYaxis()->SetTitleOffset(1.15);
     h->SetTitle("");
     h->Draw("HIST");
 
