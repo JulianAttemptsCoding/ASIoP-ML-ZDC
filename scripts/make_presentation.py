@@ -1,6 +1,6 @@
 """
-make_presentation.py
-Generates ZDC Energy Reconstruction presentation (.pptx)
+make_presentation.py  —  ZDC Energy Reconstruction presentation
+White background, matching color scheme of 20260501_ZDC_MC.pptx.pdf
 Run: python scripts/make_presentation.py
 """
 
@@ -8,12 +8,10 @@ from pptx import Presentation
 from pptx.util import Inches, Pt, Emu
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
-from pptx.util import Inches, Pt
 import os
 
 BASE = r"C:\Users\Julia\OneDrive\Desktop\coding\ASIoP\Explore MC-sim data for ZDC"
 OUT  = os.path.join(BASE, "plots", "ZDC_Energy_Reconstruction.pptx")
-
 PLOT = {
     "slide5": os.path.join(BASE, "plots", "slide5_energy_dump.png"),
     "slide6": os.path.join(BASE, "plots", "slide6_erec_dist.png"),
@@ -21,447 +19,476 @@ PLOT = {
     "slide8": os.path.join(BASE, "plots", "slide8_neutron_resolution.png"),
 }
 
-# ── colours ──────────────────────────────────────────────────────────────────
-C_DARK   = RGBColor(0x1A, 0x1A, 0x2E)   # near-black navy
-C_MID    = RGBColor(0x16, 0x21, 0x3E)   # dark blue
-C_ACCENT = RGBColor(0x0F, 0x89, 0xCA)   # bright blue
-C_WHITE  = RGBColor(0xFF, 0xFF, 0xFF)
-C_LIGHT  = RGBColor(0xD0, 0xE8, 0xF5)   # pale blue text
-C_YELLOW = RGBColor(0xFF, 0xD7, 0x00)
-C_GREEN  = RGBColor(0x5C, 0xD6, 0x5C)
-C_GRAY   = RGBColor(0xCC, 0xCC, 0xCC)
+# ── colours (matched to PDF) ──────────────────────────────────────────────
+C_WHITE      = RGBColor(0xFF, 0xFF, 0xFF)
+C_BLACK      = RGBColor(0x00, 0x00, 0x00)
+C_DARK_BLUE  = RGBColor(0x1F, 0x38, 0x64)   # dark navy — divider line
+C_MED_BLUE   = RGBColor(0x2E, 0x75, 0xB6)   # medium blue — accents / labels
+C_LIGHT_BLUE = RGBColor(0xBD, 0xD7, 0xEE)   # pale blue — info boxes, squares
+C_DECO_BLUE  = RGBColor(0x4E, 0x96, 0xC8)   # square decoration dark
+C_GRAY       = RGBColor(0x59, 0x59, 0x59)   # body secondary text
+C_DARK_GRAY  = RGBColor(0x26, 0x26, 0x26)   # body primary text
 
-W = Inches(13.33)   # widescreen 16:9
+W = Inches(13.33)
 H = Inches(7.5)
 
 prs = Presentation()
 prs.slide_width  = W
 prs.slide_height = H
+BLANK = prs.slide_layouts[6]
 
-BLANK = prs.slide_layouts[6]   # completely blank
+TOTAL = 9   # total slides for footer
 
 
-# ── helpers ──────────────────────────────────────────────────────────────────
+# ── helpers ───────────────────────────────────────────────────────────────
 
-def slide():
+def new_slide():
     s = prs.slides.add_slide(BLANK)
-    bg = s.background.fill
-    bg.solid()
-    bg.fore_color.rgb = C_DARK
+    s.background.fill.solid()
+    s.background.fill.fore_color.rgb = C_WHITE
     return s
 
-def box(s, x, y, w, h, text="", size=18, bold=False, color=C_WHITE,
-        align=PP_ALIGN.LEFT, bg=None, border=None, wrap=True):
+def rect(s, x, y, w, h, fill, line=None, line_w=Pt(0)):
+    from pptx.util import Inches
+    shape = s.shapes.add_shape(1,
+        Inches(x), Inches(y), Inches(w), Inches(h))
+    shape.fill.solid()
+    shape.fill.fore_color.rgb = fill
+    if line:
+        shape.line.color.rgb = line
+        shape.line.width = line_w
+    else:
+        shape.line.fill.background()
+    return shape
+
+def tb(s, x, y, w, h, text, size, bold=False, color=C_BLACK,
+       align=PP_ALIGN.LEFT, italic=False):
     tf = s.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
-    if bg:
-        tf.fill.solid(); tf.fill.fore_color.rgb = bg
-    if border:
-        tf.line.color.rgb = border; tf.line.width = Pt(1)
-    frame = tf.text_frame
-    frame.word_wrap = wrap
-    frame.auto_size = None
-    p = frame.paragraphs[0]
+    tf.text_frame.word_wrap = True
+    p = tf.text_frame.paragraphs[0]
     p.alignment = align
-    run = p.add_run()
-    run.text = text
-    run.font.size  = Pt(size)
-    run.font.bold  = bold
-    run.font.color.rgb = color
+    r = p.add_run()
+    r.text = text
+    r.font.size   = Pt(size)
+    r.font.bold   = bold
+    r.font.italic = italic
+    r.font.color.rgb = color
     return tf
 
-def mbox(s, x, y, w, h, lines, size=16, color=C_WHITE,
-         align=PP_ALIGN.LEFT, bg=None, border=None, leading_pt=None):
-    """Multi-paragraph textbox. lines = list of (text, bold, color_override_or_None)"""
+def mtb(s, x, y, w, h, lines, size=14, color=C_DARK_GRAY,
+        align=PP_ALIGN.LEFT, space_before=2):
+    """lines = list of (text, bold, color_or_None)"""
     tf = s.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
-    if bg:
-        tf.fill.solid(); tf.fill.fore_color.rgb = bg
-    if border:
-        tf.line.color.rgb = border; tf.line.width = Pt(1)
-    frame = tf.text_frame
-    frame.word_wrap = True
-    for i, line in enumerate(lines):
-        text, bold, col = line
-        p = frame.paragraphs[0] if i == 0 else frame.add_paragraph()
+    tf.text_frame.word_wrap = True
+    for i, (text, bold, col) in enumerate(lines):
+        p = tf.text_frame.paragraphs[0] if i == 0 else tf.text_frame.add_paragraph()
         p.alignment = align
-        if leading_pt:
-            p.space_before = Pt(leading_pt)
-        run = p.add_run()
-        run.text = text
-        run.font.size  = Pt(size)
-        run.font.bold  = bold
-        run.font.color.rgb = col if col else color
+        p.space_before = Pt(space_before)
+        r = p.add_run()
+        r.text = text
+        r.font.size  = Pt(size)
+        r.font.bold  = bold
+        r.font.color.rgb = col if col else color
     return tf
 
-def hbar(s, y, color=C_ACCENT, thickness=0.04):
-    bar = s.shapes.add_shape(1, Inches(0), Inches(y), W, Inches(thickness))
-    bar.fill.solid(); bar.fill.fore_color.rgb = color
-    bar.line.fill.background()
+def blue_box(s, x, y, w, h, lines, size=13):
+    """Light-blue info box, black text, like PDF bullet boxes."""
+    shape = s.shapes.add_shape(1,
+        Inches(x), Inches(y), Inches(w), Inches(h))
+    shape.fill.solid()
+    shape.fill.fore_color.rgb = C_LIGHT_BLUE
+    shape.line.fill.background()
+    tf = shape.text_frame
+    tf.word_wrap = True
+    for i, (text, bold) in enumerate(lines):
+        p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+        p.space_before = Pt(2)
+        r = p.add_run()
+        r.text = text
+        r.font.size  = Pt(size)
+        r.font.bold  = bold
+        r.font.color.rgb = C_DARK_GRAY
+    return shape
 
-def img(s, path, x, y, w):
-    s.shapes.add_picture(path, Inches(x), Inches(y), width=Inches(w))
+def deco_squares(s):
+    """Two overlapping blue squares top-right, matching PDF."""
+    rect(s, 12.50, 0.10, 0.45, 0.45, C_LIGHT_BLUE)
+    rect(s, 12.75, 0.00, 0.45, 0.45, C_DECO_BLUE)
 
-def section_header(s, title, subtitle=""):
-    hbar(s, 0, C_MID, 7.5)
-    hbar(s, 0, C_ACCENT, 0.08)
-    box(s, 0.3, 0.12, 12.5, 0.6, title, size=32, bold=True, color=C_WHITE)
-    if subtitle:
-        box(s, 0.3, 0.75, 12.5, 0.4, subtitle, size=17, color=C_LIGHT)
-    hbar(s, 1.15, C_ACCENT, 0.03)
+def divider(s, y=1.18):
+    """Full-width dark-blue horizontal rule + small light-blue block, like PDF."""
+    rect(s, 0.00, y,       13.33, 0.055, C_DARK_BLUE)
+    rect(s, 0.30, y-0.005, 1.20,  0.065, C_LIGHT_BLUE)
+
+def footer(s, slide_num, title_text="ZDC Energy Reconstruction"):
+    """Footer: date left | title center | page right  (like PDF)."""
+    rect(s, 0, 7.30, 13.33, 0.001, C_DARK_BLUE)
+    tb(s, 0.2,  7.33, 2.5,  0.25, "2026/06/24",  size=10, color=C_GRAY)
+    tb(s, 4.0,  7.33, 5.33, 0.25, title_text,    size=10, color=C_GRAY,
+       align=PP_ALIGN.CENTER)
+    tb(s, 11.8, 7.33, 1.3,  0.25,
+       f"{slide_num}/{TOTAL}", size=10, color=C_GRAY, align=PP_ALIGN.RIGHT)
+
+def content_header(s, title, slide_num):
+    """Standard content slide header: large black title + divider."""
+    deco_squares(s)
+    tb(s, 0.30, 0.08, 12.5, 0.95, title, size=32, bold=False, color=C_BLACK)
+    divider(s, y=1.05)
+    footer(s, slide_num)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SLIDE 1 — TITLE
 # ═══════════════════════════════════════════════════════════════════════════
-s1 = slide()
-# full-width accent bar at top
-hbar(s1, 0, C_ACCENT, 0.12)
-# institution / project line
-box(s1, 0.4, 0.18, 12, 0.4,
-    "EIC  ·  Zero Degree Calorimeter  ·  Monte Carlo Study",
-    size=14, color=C_LIGHT)
-# main title
-mbox(s1, 0.4, 0.7, 12, 1.5, [
-    ("ZDC Energy Reconstruction", True, C_WHITE),
-], size=42)
-mbox(s1, 0.4, 1.75, 12, 0.6, [
-    ("Gamma (0.7 – 40 GeV)   |   Neutron (20 – 300 GeV)", False, C_LIGHT),
-], size=20)
+s = new_slide()
+deco_squares(s)
 
-hbar(s1, 2.55, C_ACCENT, 0.04)
+# Large bold title (centered-ish, upper half)
+tb(s, 1.0, 1.6, 11.0, 1.8,
+   "ZDC Energy Reconstruction",
+   size=44, bold=True, color=C_BLACK, align=PP_ALIGN.CENTER)
+tb(s, 1.0, 3.2, 11.0, 0.6,
+   "Gamma (0.7 – 40 GeV)   |   Neutron (20 – 300 GeV)",
+   size=20, bold=False, color=C_DARK_GRAY, align=PP_ALIGN.CENTER)
 
-mbox(s1, 0.4, 2.8, 8, 3.5, [
-    ("Background", True,  C_ACCENT),
-    ("The Electron-Ion Collider (EIC) will collide electrons with protons and nuclei. "
-     "The Zero Degree Calorimeter (ZDC) sits at 0° and catches neutral particles "
-     "(neutrons, photons) that travel straight through the bending magnets.", False, C_WHITE),
-    ("", False, None),
-    ("Goal", True, C_ACCENT),
-    ("Determine how well the ZDC can measure the energy of these particles using "
-     "Monte Carlo simulations, and check if performance meets physics requirements.", False, C_WHITE),
-], size=16, leading_pt=4)
+# Divider bar (same style as PDF title slide)
+divider(s, y=4.05)
 
-# right side mini-diagram
-mbox(s1, 9.2, 2.8, 3.8, 3.5, [
-    ("Detector layers", True,  C_YELLOW),
-    ("", False, None),
-    ("ECAL  —  LYSO crystals + SiPM", False, C_LIGHT),
-    ("Detects: photons, electrons", False, C_GRAY),
-    ("", False, None),
-    ("HCAL  —  Steel + scintillator", False, C_LIGHT),
-    ("Detects: neutrons, hadrons",    False, C_GRAY),
-    ("", False, None),
-    ("Both layers needed to fully", False, C_WHITE),
-    ("reconstruct particle energy.",  False, C_WHITE),
-], size=14, bg=C_MID, border=C_ACCENT, leading_pt=2)
+# Author / affiliation below divider
+tb(s, 1.0, 4.25, 11.0, 0.5,
+   "EIC  ·  Zero Degree Calorimeter  ·  Monte Carlo Study",
+   size=18, bold=True, color=C_BLACK, align=PP_ALIGN.CENTER)
+tb(s, 1.0, 4.85, 11.0, 0.45,
+   "ASIoP  ·  Academia Sinica  ·  Taiwan Group",
+   size=16, bold=False, color=C_DARK_GRAY, align=PP_ALIGN.CENTER)
 
-hbar(s1, 7.3, C_ACCENT, 0.12)
-box(s1, 0.3, 7.1, 12, 0.35,
-    "ASIoP  ·  Explore MC-sim data for ZDC",
-    size=12, color=C_GRAY, align=PP_ALIGN.CENTER)
+footer(s, 1)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# SLIDE 2 — RAW DATA & VARIABLE DEFINITIONS
+# SLIDE 2 — BACKGROUND
 # ═══════════════════════════════════════════════════════════════════════════
-s2 = slide()
-section_header(s2, "From Raw Data to Graph Axes",
-               "Every variable defined — step by step")
+s = new_slide()
+content_header(s, "Background", 2)
 
-mbox(s2, 0.3, 1.3, 5.9, 5.8, [
-    ("Step 1 — Simulation output (raw data)", True, C_YELLOW),
-    ("Each simulated particle event gives:", False, C_LIGHT),
-    ("", False, None),
-    ("  E_beam   True beam energy (GeV). Set by simulation. This is what we want to reconstruct.", False, C_WHITE),
-    ("  E_ECAL   Energy deposited in the ECAL layer (GeV). Measured signal.", False, C_WHITE),
-    ("  E_HCAL   Energy deposited in the HCAL layer (GeV). Measured signal.", False, C_WHITE),
-    ("", False, None),
-    ("These three numbers exist for every event. All other quantities are derived.", False, C_GRAY),
-    ("", False, None),
-    ("Step 2 — Energy reconstruction", True, C_YELLOW),
-    ("Combine the two detector signals into one energy estimate:", False, C_LIGHT),
-    ("", False, None),
-    ("  E_rec  =  p0 + p1·E_ECAL + p2·E_HCAL", False, C_GREEN),
-    ("", False, None),
-    ("p0, p1, p2 are fit parameters found by least-squares regression "
-     "across all simulated events. Three regression methods are used:", False, C_WHITE),
-    ("  m0 — Linear    m1 — Ratio    m2 — Quadratic", False, C_LIGHT),
-    ("Two weighting schemes:", False, C_WHITE),
-    ("  w0 — all energies equal weight", False, C_LIGHT),
-    ("  w1 — weight each event by √E_beam  (emphasises low-energy accuracy)", False, C_LIGHT),
-], size=13, leading_pt=1)
+mtb(s, 0.35, 1.25, 12.5, 0.5, [
+    ("What is the EIC and ZDC?", True, C_MED_BLUE),
+], size=18)
 
-mbox(s2, 6.5, 1.3, 6.5, 5.8, [
-    ("Step 3 — Per-event ratio", True, C_YELLOW),
-    ("", False, None),
-    ("  r  =  E_rec / E_beam", False, C_GREEN),
-    ("", False, None),
-    ("r = 1.0  →  perfect reconstruction", False, C_WHITE),
-    ("r > 1.0  →  overestimated", False, C_WHITE),
-    ("r < 1.0  →  underestimated", False, C_WHITE),
-    ("", False, None),
-    ("Step 4 — Histogram & DCB fit", True, C_YELLOW),
-    ("Collect r for all events at one beam energy.", False, C_WHITE),
-    ("Fit with Double Crystal Ball (bell curve with power-law tails).", False, C_WHITE),
-    ("Extract two numbers:", False, C_LIGHT),
-    ("", False, None),
-    ("  μ  (mu)    =  mean of fit  →  bias", False, C_GREEN),
-    ("  σ  (sigma) =  width of fit →  resolution", False, C_GREEN),
-    ("", False, None),
-    ("Step 5 — Graph axes", True, C_YELLOW),
-    ("", False, None),
-    ("Slide 5 x-axis:  E_beam (GeV)", False, C_WHITE),
-    ("Slide 5 y-axis:  mean(E_sub / E_beam)  per beam energy", False, C_WHITE),
-    ("Slide 6 x-axis:  r = E_rec / E_beam  (single energy)", False, C_WHITE),
-    ("Slide 6 y-axis:  event count", False, C_WHITE),
-    ("Slides 7-8 x:    E_beam (GeV)", False, C_WHITE),
-    ("Slides 7-8 y:    σ (resolution)  or  μ (bias)  from DCB fit", False, C_WHITE),
-], size=13, bg=C_MID, border=C_ACCENT, leading_pt=1)
+mtb(s, 0.35, 1.65, 12.5, 1.0, [
+    ("The Electron-Ion Collider (EIC) collides electrons with protons and heavy nuclei to study "
+     "the internal structure of matter. The Zero Degree Calorimeter (ZDC) sits at 0 degrees at "
+     "the end of the beamline, catching neutral particles that fly straight through the bending "
+     "magnets — primarily neutrons and photons (gammas).", False, None),
+], size=14)
+
+mtb(s, 0.35, 2.7, 12.5, 0.5, [
+    ("Detector design", True, C_MED_BLUE),
+], size=18)
+
+blue_box(s, 0.35, 3.1, 5.9, 2.1, [
+    ("ECAL  —  Electromagnetic Calorimeter", True),
+    ("  Material:   LYSO crystal + SiPM", False),
+    ("  Size:       20x20 cells, 3x3x7 cm/cell, 60x60 cm total", False),
+    ("  Detects:    photons, electrons", False),
+    ("  Radiation length:  7 cm ~ 6.5 X0 in Z", False),
+], size=13)
+
+blue_box(s, 6.55, 3.1, 6.4, 2.1, [
+    ("HCAL  —  Hadronic Calorimeter (sampling)", True),
+    ("  Material:   steel absorber + scintillator tile + SiPM", False),
+    ("  Size:       64 layers, 65x60 cm face, 163 cm deep", False),
+    ("  Detects:    neutrons, hadrons", False),
+    ("  Layer:      1 steel + 1 scintillator per sampling unit", False),
+], size=13)
+
+mtb(s, 0.35, 5.35, 12.5, 0.5, [
+    ("Goal of this study", True, C_MED_BLUE),
+], size=18)
+
+mtb(s, 0.35, 5.75, 12.5, 1.2, [
+    ("Using Monte Carlo simulation with a 25-degree opening angle beam spread, determine how "
+     "well the ZDC reconstructs the energy of incident gammas (0.7 – 40 GeV) and neutrons "
+     "(20 – 300 GeV), and verify whether performance meets the EIC physics requirements.", False, None),
+], size=14)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# SLIDE 3 — METHOD & THINKING
+# SLIDE 3 — RAW DATA & VARIABLE DEFINITIONS
 # ═══════════════════════════════════════════════════════════════════════════
-s3 = slide()
-section_header(s3, "Method & Thinking",
-               "How we go from signals to performance numbers")
+s = new_slide()
+content_header(s, "From Raw Data to Graph Axes", 3)
 
-mbox(s3, 0.3, 1.3, 4.0, 5.8, [
-    ("Why two detectors?", True, C_YELLOW),
-    ("Gammas deposit ~30–50% of energy in ECAL, almost none in HCAL. "
-     "Neutrons are the opposite. Using both signals together gives a more complete picture.", False, C_WHITE),
-    ("", False, None),
-    ("Why regression?", True, C_YELLOW),
-    ("Raw signals are not equal to energy — there is leakage, dead material, "
-     "and non-linearity. Regression learns the correction from simulation.", False, C_WHITE),
-    ("", False, None),
-    ("Why √E weighting?", True, C_YELLOW),
-    ("Equal weighting lets high-energy events dominate the fit "
-     "(they have bigger absolute residuals). "
-     "√E weighting balances accuracy across the full energy range.", False, C_WHITE),
-], size=14, leading_pt=3)
+mtb(s, 0.35, 1.2, 5.9, 0.4, [("Step 1 — Simulation output (raw data)", True, C_MED_BLUE)], size=16)
+blue_box(s, 0.35, 1.6, 5.9, 2.2, [
+    ("E_beam   True beam energy (GeV)", True),
+    ("         Set by simulation. What we want to reconstruct.", False),
+    ("", False),
+    ("E_ECAL   Energy deposited in ECAL layer (GeV)", True),
+    ("         Measured detector signal.", False),
+    ("", False),
+    ("E_HCAL   Energy deposited in HCAL layer (GeV)", True),
+    ("         Measured detector signal.", False),
+], size=12)
 
-mbox(s3, 4.5, 1.3, 4.4, 5.8, [
-    ("Why DCB fit?", True, C_YELLOW),
-    ("Real detector distributions have heavier tails than a pure Gaussian — "
-     "energy leaking out the sides creates a low-side tail, "
-     "shower fluctuations create a high-side tail. "
-     "The Double Crystal Ball handles both.", False, C_WHITE),
-    ("", False, None),
-    ("The requirement curve", True, C_YELLOW),
-    ("σ(E)  =  p0 / √E  +  0.05", False, C_GREEN),
-    ("Physics demands resolution better than this threshold.", False, C_WHITE),
-    ("  Gamma:   p0 = 0.20  (new target)", False, C_LIGHT),
-    ("  Neutron: p0 = 0.35  (new target)", False, C_LIGHT),
-    ("The 0.05 floor is irreducible — calibration and geometry limits.", False, C_GRAY),
-], size=14, leading_pt=3)
+mtb(s, 0.35, 3.95, 5.9, 0.4, [("Step 2 — Energy reconstruction", True, C_MED_BLUE)], size=16)
+blue_box(s, 0.35, 4.35, 5.9, 1.85, [
+    ("E_rec = p0 + p1*E_ECAL + p2*E_HCAL", True),
+    ("", False),
+    ("p0, p1, p2 fit by least-squares regression.", False),
+    ("3 methods (m0 linear / m1 ratio / m2 quadratic).", False),
+    ("2 weightings (w0 equal / w1 sqrt(E_beam)).", False),
+], size=12)
 
-mbox(s3, 9.1, 1.3, 4.0, 5.8, [
-    ("6 method combinations", True, C_YELLOW),
-    ("", False, None),
-    ("m0 w0 — Linear, Equal",        False, C_WHITE),
-    ("m1 w0 — Ratio,  Equal",        False, C_WHITE),
-    ("m2 w0 — Quadratic, Equal",     False, C_WHITE),
-    ("m0 w1 — Linear, √E-weighted",  False, C_WHITE),
-    ("m1 w1 — Ratio,  √E-weighted",  False, C_WHITE),
-    ("m2 w1 — Quadratic, √E-weighted", False, C_WHITE),
-    ("", False, None),
-    ("All six appear on resolution", False, C_LIGHT),
-    ("and bias plots. Compare them", False, C_LIGHT),
-    ("to find best-performing method.", False, C_LIGHT),
-    ("", False, None),
-    ("Output files:", True, C_YELLOW),
-    ("res2_1_m{0-2}_w{0-1}_{particle}.root", False, C_GREEN),
-    ("Each stores gReso_dcb and", False, C_WHITE),
-    ("gBias_dcb — one point per", False, C_WHITE),
-    ("beam energy tested.", False, C_WHITE),
-], size=13, bg=C_MID, border=C_ACCENT, leading_pt=2)
+mtb(s, 6.55, 1.2, 6.4, 0.4, [("Step 3 — Per-event ratio", True, C_MED_BLUE)], size=16)
+blue_box(s, 6.55, 1.6, 6.4, 1.5, [
+    ("r  =  E_rec / E_beam", True),
+    ("", False),
+    ("r = 1.0  ->  perfect reconstruction", False),
+    ("r > 1.0  ->  overestimated energy", False),
+    ("r < 1.0  ->  underestimated energy", False),
+], size=12)
+
+mtb(s, 6.55, 3.25, 6.4, 0.4, [("Step 4 — DCB fit on r distribution", True, C_MED_BLUE)], size=16)
+blue_box(s, 6.55, 3.65, 6.4, 1.35, [
+    ("mu    = mean  of fit  ->  BIAS value", True),
+    ("sigma = width of fit  ->  RESOLUTION value", True),
+    ("", False),
+    ("Bell curve with power-law tails (DCB).", False),
+], size=12)
+
+mtb(s, 6.55, 5.15, 6.4, 0.4, [("Step 5 — What each graph axis is", True, C_MED_BLUE)], size=16)
+blue_box(s, 6.55, 5.55, 6.4, 1.6, [
+    ("Slide 5  x: E_beam     y: mean(E_sub/E_beam)", False),
+    ("Slide 6  x: E_rec/E_beam    y: event count", False),
+    ("Slide 7-8  x: E_beam", False),
+    ("           y: sigma (resolution plot)", False),
+    ("           y: mu    (bias plot)", False),
+], size=12)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# SLIDE 4 — GRAPH: ENERGY DUMP (slide 5)
+# SLIDE 4 — METHOD
 # ═══════════════════════════════════════════════════════════════════════════
-s4 = slide()
-section_header(s4, "Energy Deposition vs Beam Energy",
-               "How much of the particle's energy does each detector layer actually see?")
+s = new_slide()
+content_header(s, "Method", 4)
 
-img(s4, PLOT["slide5"], 0.2, 1.25, 9.0)
-
-mbox(s4, 9.4, 1.3, 3.7, 5.8, [
-    ("What the axes mean", True, C_YELLOW),
-    ("", False, None),
-    ("x-axis:  E_beam (GeV)", False, C_LIGHT),
-    ("True simulated beam energy.", False, C_WHITE),
-    ("", False, None),
-    ("y-axis:  E_sub / E_beam", False, C_LIGHT),
-    ("Fraction of beam energy seen", False, C_WHITE),
-    ("by ECAL, HCAL, or both.", False, C_WHITE),
-    ("Averaged over all events at", False, C_WHITE),
-    ("that beam energy.", False, C_WHITE),
-    ("", False, None),
-    ("Observations", True, C_YELLOW),
-    ("", False, None),
-    ("Gamma ECAL: 0.5 → 0.15", False, C_WHITE),
-    ("Falls with energy (saturation).", False, C_GRAY),
-    ("HCAL: tiny (10⁻³ scale).", False, C_GRAY),
-    ("", False, None),
-    ("Neutron ECAL: near zero.", False, C_WHITE),
-    ("HCAL: 0.01–0.02, rises slowly.", False, C_GRAY),
-    ("Neither detector alone is enough.", False, C_GRAY),
-], size=13, bg=C_MID, border=C_ACCENT, leading_pt=2)
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# SLIDE 5 — GRAPH: E_rec DISTRIBUTION (slide 6)
-# ═══════════════════════════════════════════════════════════════════════════
-s5 = slide()
-section_header(s5, "E_rec / E_beam Distribution  —  1 GeV Gamma",
-               "The shape of reconstructed energy tells us resolution and bias")
-
-img(s5, PLOT["slide6"], 1.5, 1.2, 7.0)
-
-mbox(s5, 8.8, 1.3, 4.3, 5.8, [
-    ("What the axes mean", True, C_YELLOW),
-    ("", False, None),
-    ("x-axis:  r = E_rec / E_beam", False, C_LIGHT),
-    ("Reconstructed energy divided by", False, C_WHITE),
-    ("true beam energy, per event.", False, C_WHITE),
-    ("r = 1.0 is perfect.", False, C_WHITE),
-    ("", False, None),
-    ("y-axis:  Counts", False, C_LIGHT),
-    ("How many events fell in each r bin.", False, C_WHITE),
-    ("", False, None),
-    ("Red curve:  DCB fit", False, C_LIGHT),
-    ("Bell curve with heavier tails.", False, C_WHITE),
-    ("Fit extracts μ and σ.", False, C_WHITE),
-    ("", False, None),
-    ("Stats box", True, C_YELLOW),
-    ("Mean  = 1.01  →  bias near 0%", False, C_GREEN),
-    ("Sigma = 0.15  →  15% resolution", False, C_WHITE),
-    ("                at 1 GeV (expected)", False, C_GRAY),
-    ("Chi2/NDF = 0.78  →  good fit", False, C_WHITE),
-    ("", False, None),
-    ("Note: left tail = energy leakage.", False, C_GRAY),
-    ("Right tail = shower fluctuations.", False, C_GRAY),
-], size=13, bg=C_MID, border=C_ACCENT, leading_pt=2)
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# SLIDE 6 — GRAPH: GAMMA RESOLUTION & BIAS (slide 7)
-# ═══════════════════════════════════════════════════════════════════════════
-s6 = slide()
-section_header(s6, "Gamma:  Resolution & Bias vs Beam Energy  (0.7 – 40 GeV)",
-               "Does the detector meet requirements? How accurate is reconstruction?")
-
-img(s6, PLOT["slide7"], 0.1, 1.2, 13.0)
-
-mbox(s6, 0.3, 5.8, 6.2, 1.5, [
-    ("Resolution (left panel):", True, C_YELLOW),
-    ("y = σ from DCB fit.  x = E_beam.  "
-     "Dashed lines = requirements  σ = p0/√E + 0.05.  "
-     "All methods fall below new requirement (p0=0.20) → detector passes.", False, C_WHITE),
-], size=13, bg=C_MID, border=C_ACCENT)
-
-mbox(s6, 6.7, 5.8, 6.3, 1.5, [
-    ("Bias (centre panel):", True, C_YELLOW),
-    ("y = μ from DCB fit.  Ideal = 1.0.  "
-     "Gamma bias is well-behaved across all methods (0.90–1.06).  "
-     "Small dip at 0.7 GeV for quadratic equal-weighted (m2 w0).", False, C_WHITE),
-], size=13, bg=C_MID, border=C_ACCENT)
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# SLIDE 7 — GRAPH: NEUTRON RESOLUTION & BIAS (slide 8)
-# ═══════════════════════════════════════════════════════════════════════════
-s7 = slide()
-section_header(s7, "Neutron:  Resolution & Bias vs Beam Energy  (20 – 300 GeV)",
-               "Equal-weighting struggles at low energy — sqrt-E weighting fixes it")
-
-img(s7, PLOT["slide8"], 0.1, 1.2, 13.0)
-
-mbox(s7, 0.3, 5.8, 6.2, 1.5, [
-    ("Resolution (left panel):", True, C_YELLOW),
-    ("y = σ from DCB fit.  x = E_beam.  "
-     "√E-weighted methods (open markers) meet the new requirement (p0=0.35) at most energies.  "
-     "Equal-weighted methods are worse, especially below 50 GeV.", False, C_WHITE),
-], size=13, bg=C_MID, border=C_ACCENT)
-
-mbox(s7, 6.7, 5.8, 6.3, 1.5, [
-    ("Bias (centre panel):", True, C_YELLOW),
-    ("y = μ from DCB fit.  Equal-weighted methods: μ up to 2–3.5 at 20 GeV  "
-     "(regression dominated by high-energy events, fails to extrapolate low).  "
-     "√E-weighted: μ ≈ 1.1–1.3 at 20 GeV — far more controlled.", False, C_WHITE),
-], size=13, bg=C_MID, border=C_ACCENT)
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# SLIDE 8 — OBSERVATIONS
-# ═══════════════════════════════════════════════════════════════════════════
-s8 = slide()
-section_header(s8, "Observations", "What the data tells us")
-
-mbox(s8, 0.4, 1.3, 5.9, 5.8, [
-    ("Energy deposition", True, C_YELLOW),
-    ("Gammas are almost entirely ECAL particles — HCAL contribution is 1000× smaller. "
-     "Neutrons are HCAL particles with essentially zero ECAL signal. "
-     "Neither sub-detector alone is sufficient — both are required for reconstruction.", False, C_WHITE),
-    ("", False, None),
-    ("Reconstruction distribution", True, C_YELLOW),
-    ("At 1 GeV gamma: mean = 1.01 (near-perfect accuracy), sigma = 0.15 (15% resolution). "
-     "The DCB fit captures the asymmetric tails well (chi2/NDF ≈ 0.78). "
-     "The left tail is caused by leakage; the right by upward shower fluctuations.", False, C_WHITE),
-], size=15, leading_pt=4)
-
-mbox(s8, 6.6, 1.3, 6.4, 5.8, [
-    ("Gamma performance", True, C_YELLOW),
-    ("All six reconstruction methods meet the new resolution requirement "
-     "(20%/√E + 5%) across 0.7–40 GeV. Bias is controlled within ±6%. "
-     "Linear and quadratic methods perform similarly — ratio method slightly worse at low energy.", False, C_WHITE),
-    ("", False, None),
-    ("Neutron performance", True, C_YELLOW),
-    ("√E-weighted methods are clearly superior. "
-     "Equal-weighted bias reaches 3.5× at 20 GeV — reconstruction is unreliable there. "
-     "√E-weighted bias stays below 1.35× across all energies tested. "
-     "Resolution with √E-weighting is close to the new requirement (35%/√E + 5%) "
-     "but may need further tuning at low energies.", False, C_WHITE),
-], size=15, bg=C_MID, border=C_ACCENT, leading_pt=4)
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# SLIDE 9 — OUTLOOK
-# ═══════════════════════════════════════════════════════════════════════════
-s9 = slide()
-section_header(s9, "Outlook", "What comes next")
-
-items = [
-    ("Optimise neutron at low energy",
-     "The 20–50 GeV range shows the largest bias and worst resolution. "
-     "Consider energy-dependent regression coefficients or a neural-network-based approach.",
-     C_ACCENT),
-    ("Validate with full EIC simulation",
-     "Current MC uses idealized geometry. Full GEANT4 simulation with beam backgrounds, "
-     "crossing angle, and realistic hit digitization will stress-test these results.",
-     C_ACCENT),
-    ("Extend to ML regression",
-     "Linear regression is a baseline. Gradient-boosted trees or a simple feed-forward network "
-     "using ECAL+HCAL hit maps (not just sums) could reduce σ and bias further.",
-     C_ACCENT),
-    ("Cross-check with data",
-     "Once EIC test-beam data is available, compare MC resolution to real measurements "
-     "to validate simulation accuracy and calibrate systematic uncertainties.",
-     C_ACCENT),
+cols = [
+    ("Why two detectors?",
+     "Gammas deposit 20-60% of energy in ECAL, almost nothing in HCAL. "
+     "Neutrons are the opposite — nearly all energy in HCAL. "
+     "Using both signals together gives a complete picture.",
+     0.35),
+    ("Why regression?",
+     "Raw signals are not equal to energy. There is leakage, dead material, "
+     "and detector non-linearity. Regression learns the correction from simulation.",
+     4.60),
+    ("Why sqrt(E) weighting?",
+     "Equal weighting lets high-energy events dominate the fit "
+     "(bigger absolute residuals in GeV). "
+     "sqrt(E_beam) weighting balances accuracy across the full energy range.",
+     8.85),
 ]
+for title, body, x in cols:
+    mtb(s, x, 1.25, 4.1, 0.4, [(title, True, C_MED_BLUE)], size=16)
+    mtb(s, x, 1.7,  4.1, 1.6, [(body,  False, None)], size=13)
 
-for i, (title, body, col) in enumerate(items):
-    row = i // 2
-    col_idx = i % 2
-    x = 0.4 + col_idx * 6.5
-    y = 1.4 + row * 2.8
-    mbox(s9, x, y, 6.1, 2.5, [
-        (title, True, C_YELLOW),
-        (body,  False, C_WHITE),
-    ], size=14, bg=C_MID, border=col, leading_pt=4)
+mtb(s, 0.35, 3.4, 12.5, 0.4, [("Why DCB fit?", True, C_MED_BLUE)], size=16)
+mtb(s, 0.35, 3.85, 12.5, 0.9, [
+    ("Real shower distributions have heavier tails than a Gaussian — energy leaking out the sides "
+     "creates a slow left tail; upward shower fluctuations create a slow right tail. "
+     "The Double Crystal Ball uses a Gaussian core with power-law tails to match this.", False, None),
+], size=13)
+
+mtb(s, 0.35, 4.85, 12.5, 0.4, [("The requirement curve", True, C_MED_BLUE)], size=16)
+blue_box(s, 0.35, 5.3, 5.9, 2.0, [
+    ("sigma(E) = p0 / sqrt(E)  +  0.05", True),
+    ("", False),
+    ("p0/sqrt(E)  stochastic term: shower fluctuations scale as", False),
+    ("            1/sqrt(E) from Poisson statistics.", False),
+    ("0.05        constant floor: calibration, dead material,", False),
+    ("            leakage — cannot improve with more energy.", False),
+], size=12)
+
+blue_box(s, 6.55, 5.3, 6.4, 2.0, [
+    ("Gamma requirement:   p0 = 0.20 (new)   p0 = 0.35 (old)", False),
+    ("Neutron requirement: p0 = 0.35 (new)   p0 = 0.50 (old)", False),
+    ("", False),
+    ("6 method/weighting combos tested:", False),
+    ("  m0w0  m1w0  m2w0  (equal-weighted)", False),
+    ("  m0w1  m1w1  m2w1  (sqrt(E)-weighted)", False),
+], size=12)
 
 
-# ── save ─────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════
+# SLIDE 5 — ENERGY DUMP GRAPH
+# ═══════════════════════════════════════════════════════════════════════════
+s = new_slide()
+content_header(s, "Energy Dump", 5)
+
+s.shapes.add_picture(PLOT["slide5"], Inches(0.2), Inches(1.2), width=Inches(8.9))
+
+mtb(s, 9.3, 1.25, 3.8, 0.4, [("Axes", True, C_MED_BLUE)], size=15)
+blue_box(s, 9.3, 1.65, 3.8, 1.55, [
+    ("x-axis:  E_beam (GeV)", True),
+    ("         True simulated beam energy.", False),
+    ("", False),
+    ("y-axis:  E_sub / E_beam", True),
+    ("         Fraction of beam energy seen", False),
+    ("         by one detector layer.", False),
+], size=12)
+
+mtb(s, 9.3, 3.35, 3.8, 0.4, [("Observations", True, C_MED_BLUE)], size=15)
+blue_box(s, 9.3, 3.75, 3.8, 3.45, [
+    ("Gamma (top row):", True),
+    ("ECAL fraction 0.5 -> 0.15.", False),
+    ("Falls with energy (saturation).", False),
+    ("HCAL fraction ~10^-3 — tiny.", False),
+    ("Gammas are ECAL particles.", False),
+    ("", False),
+    ("Neutron (bottom row):", True),
+    ("ECAL fraction ~0 — near zero.", False),
+    ("HCAL fraction 0.01 – 0.02.", False),
+    ("Neutrons are HCAL particles.", False),
+    ("", False),
+    ("Neither detector alone is enough.", False),
+], size=12)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SLIDE 6 — E_rec DISTRIBUTION
+# ═══════════════════════════════════════════════════════════════════════════
+s = new_slide()
+content_header(s, "E_rec / E_beam Distribution  —  1 GeV Gamma", 6)
+
+s.shapes.add_picture(PLOT["slide6"], Inches(1.2), Inches(1.2), width=Inches(7.2))
+
+mtb(s, 8.7, 1.25, 4.3, 0.4, [("Axes", True, C_MED_BLUE)], size=15)
+blue_box(s, 8.7, 1.65, 4.3, 1.8, [
+    ("x-axis:  r = E_rec / E_beam", True),
+    ("         Reconstructed over true energy.", False),
+    ("         r = 1.0 is perfect.", False),
+    ("", False),
+    ("y-axis:  Counts", True),
+    ("         Events per r bin.", False),
+    ("Red curve:  DCB fit", True),
+], size=12)
+
+mtb(s, 8.7, 3.6, 4.3, 0.4, [("Observations", True, C_MED_BLUE)], size=15)
+blue_box(s, 8.7, 4.0, 4.3, 3.2, [
+    ("Mean  = 1.01 -> bias < 1%", True),
+    ("Near-perfect reconstruction.", False),
+    ("", False),
+    ("Sigma = 0.15 -> 15% resolution", True),
+    ("Expected: 1/sqrt(1 GeV) term large.", False),
+    ("", False),
+    ("Chi2/NDF = 0.78 -> good fit", True),
+    ("", False),
+    ("Left tail:  energy leakage out", False),
+    ("            detector sides/back.", False),
+    ("Right tail: upward shower fluct.", False),
+], size=12)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SLIDE 7 — GAMMA RESOLUTION & BIAS
+# ═══════════════════════════════════════════════════════════════════════════
+s = new_slide()
+content_header(s, "Gamma:  Resolution & Bias  (0.7 – 40 GeV)", 7)
+
+s.shapes.add_picture(PLOT["slide7"], Inches(0.1), Inches(1.15), width=Inches(13.1))
+
+blue_box(s, 0.20, 5.72, 6.3, 1.6, [
+    ("Resolution (left panel):", True),
+    ("y = sigma from DCB fit,  x = E_beam.", False),
+    ("Dashed lines = requirement curves sigma = p0/sqrt(E) + 0.05.", False),
+    ("All methods fall below the new requirement (p0 = 0.20).", False),
+    ("Detector passes for gamma.", False),
+], size=12)
+
+blue_box(s, 6.75, 5.72, 6.3, 1.6, [
+    ("Bias (centre panel):", True),
+    ("y = mu from DCB fit,  ideal = 1.0.", False),
+    ("All methods within 0.90 – 1.06 across full energy range.", False),
+    ("Small dip at 0.7 GeV for quadratic equal-weighted (m2 w0).", False),
+    ("Gamma bias is well-controlled for all methods.", False),
+], size=12)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SLIDE 8 — NEUTRON RESOLUTION & BIAS
+# ═══════════════════════════════════════════════════════════════════════════
+s = new_slide()
+content_header(s, "Neutron:  Resolution & Bias  (20 – 300 GeV)", 8)
+
+s.shapes.add_picture(PLOT["slide8"], Inches(0.1), Inches(1.15), width=Inches(13.1))
+
+blue_box(s, 0.20, 5.72, 6.3, 1.6, [
+    ("Resolution (left panel):", True),
+    ("y = sigma from DCB fit,  x = E_beam.", False),
+    ("sqrt(E)-weighted methods (open markers) meet the new requirement", False),
+    ("(p0 = 0.35) at most energies.", False),
+    ("Equal-weighted methods are worse, especially below 50 GeV.", False),
+], size=12)
+
+blue_box(s, 6.75, 5.72, 6.3, 1.6, [
+    ("Bias (centre panel):", True),
+    ("Equal-weighted: mu up to 2 – 3.5 at 20 GeV.", False),
+    ("Regression dominated by high-E events, fails at low energy.", False),
+    ("sqrt(E)-weighted: mu = 1.1 – 1.3 at 20 GeV. Far more controlled.", False),
+    ("sqrt(E) weighting is the recommended method for neutrons.", False),
+], size=12)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SLIDE 9 — OBSERVATIONS & OUTLOOK
+# ═══════════════════════════════════════════════════════════════════════════
+s = new_slide()
+content_header(s, "Observations & Outlook", 9)
+
+mtb(s, 0.35, 1.2, 12.5, 0.4, [("Observations", True, C_MED_BLUE)], size=17)
+blue_box(s, 0.35, 1.62, 5.9, 2.55, [
+    ("Gamma", True),
+    ("All 6 methods meet the new resolution requirement", False),
+    ("(20%/sqrt(E) + 5%) across 0.7 – 40 GeV.", False),
+    ("Bias controlled within +/- 6% for all methods.", False),
+    ("Linear and quadratic perform similarly.", False),
+    ("Ratio method slightly worse at low energy.", False),
+], size=12)
+
+blue_box(s, 6.55, 1.62, 6.4, 2.55, [
+    ("Neutron", True),
+    ("sqrt(E)-weighted methods are clearly superior.", False),
+    ("Equal-weighted bias reaches 3.5x at 20 GeV — unreliable.", False),
+    ("sqrt(E)-weighted bias stays below 1.35x across all energies.", False),
+    ("Resolution close to new requirement (35%/sqrt(E) + 5%);", False),
+    ("may need tuning at low energies.", False),
+], size=12)
+
+mtb(s, 0.35, 4.35, 12.5, 0.4, [("Outlook", True, C_MED_BLUE)], size=17)
+
+outlook = [
+    ("Optimise neutron at low energy",
+     "20–50 GeV range shows largest bias and worst resolution. "
+     "Consider energy-dependent regression or neural-network approach.",
+     0.35),
+    ("Validate with full GEANT4 simulation",
+     "Current MC is idealized geometry. Full simulation with beam backgrounds, "
+     "crossing angle, and realistic digitization will stress-test results.",
+     4.60),
+    ("Extend to ML regression",
+     "Linear regression is a baseline. Networks using ECAL+HCAL hit maps "
+     "(not just sums) could reduce sigma and bias further.",
+     8.85),
+]
+for title, body, x in outlook:
+    blue_box(s, x, 4.78, 4.1, 2.55, [
+        (title, True),
+        ("", False),
+        (body, False),
+    ], size=12)
+
+
+# ── save ─────────────────────────────────────────────────────────────────
 prs.save(OUT)
 print(f"[OK] Saved: {OUT}")
