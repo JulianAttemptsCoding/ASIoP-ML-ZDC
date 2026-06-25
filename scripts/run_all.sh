@@ -15,12 +15,15 @@ if ! command -v root >/dev/null 2>&1; then
   exit 1
 fi
 
-# Generate the three clean physics graphs (no slides).
-root -l -q 'scripts/zdc_reco_browser.C("data","plots")'
+# Generate the four clean physics graphs (no slides).
+# The trailing '+' compiles the macro with ACLiC (much faster per-event loop over the
+# ~2 GB of raw data; the compiled .so is cached for subsequent runs).
+root -l -b -q 'scripts/zdc_reco_browser.C+("data","plots")'
 
 echo ""
-echo "Done. Graphs:"
+echo "Done. 4 graphs (match reference slides 5-8):"
 echo "  plots/energy_dump.png"
+echo "  plots/gamma1GeV_regression.png"
 echo "  plots/gamma_resolution_bias.png"
 echo "  plots/neutron_resolution_bias.png"
 echo ""

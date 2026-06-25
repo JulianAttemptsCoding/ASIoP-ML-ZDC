@@ -5,6 +5,12 @@ outfile_*.root
 # Regenerable analysis archive (TBrowser QA file); rebuild with scripts/run_all.sh
 qa/*.root
 
+# ROOT ACLiC compiled-macro build artifacts
+scripts/*_C.so
+scripts/*_C.d
+scripts/*_C_ACLiC_dict_rdict.pcm
+*_ACLiC_*
+
 # Unix NFS lock files
 .nfs*
 
