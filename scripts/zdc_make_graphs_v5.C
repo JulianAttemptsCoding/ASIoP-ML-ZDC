@@ -1,18 +1,9 @@
 // zdc_make_graphs_v5.C — regression-focused ZDC graph pipeline
 // Goal: rebuild only the energy-reconstruction graphs from raw outfile_*.root files.
-// Gold-standard references:
-//   - gamma main window:   [1,40] GeV; MeV files are kept in QA but excluded from main regression graphs.
-//   - neutron main window: [20,300] GeV; any lower-energy neutron file is kept and can be included in training diagnostics.
-// Regression fixes vs v4:
-//   1) Restore the original working macro's quadratic regression basis:
-//        Erec = p0 + p1*ECAL + p2*HCAL + p3*ECAL^2 + p4*HCAL^2
-//      The slide text's compact quadratic formula was not the behavior of the older working macro.
-//   2) Add p0 modes so p0 is not silently forced large:
-//        p0free  = ordinary intercept, closest to the older ROOT macro / PDF behavior.
-//        p0zero  = p0 fixed exactly 0.
-//        p0ridge = p0 softly constrained near 0 with sigma = 0.25 GeV.
-//   3) Use scale-only feature normalization. No centering is used, so p0 remains a real physical intercept.
-//   4) Keep all raw data in QA CSVs and TBrowser; main plots still use the PDF energy windows.
+// Uses ALL data — no energy-window filtering for gamma or neutron.
+// Regression:
+//   - p0free (free intercept) and p0zero (no intercept) modes only; p0ridge removed.
+//   - Feature normalization: scale-only (no centering), so p0 is a real physical intercept.
 //
 // Run:
 //   root -l -q 'scripts/zdc_make_graphs_v5.C("data","plots","qa")'
@@ -54,12 +45,11 @@
 using std::string;
 using std::vector;
 
-static const double GAMMA_MAIN_MIN_GEV   = 0.999;
+static const double GAMMA_MAIN_MIN_GEV   = 0.05;  // include all gamma (was 0.999)
 static const double GAMMA_MAIN_MAX_GEV   = 40.5;
-static const double NEUTRON_EVAL_MIN_GEV = 19.5;
+static const double NEUTRON_EVAL_MIN_GEV = 0.0;   // include all neutron (was 19.5)
 static const double NEUTRON_EVAL_MAX_GEV = 300.5;
 static const double VIS_CUT_FRAC         = 0.001;
-static const double P0_RIDGE_SIGMA_GEV   = 0.25;
 
 static const char* METHOD_LABEL[3] = {"Linear Fun.", "Ratio Fun.", "Quadratic Fun."};
 static const char* WEIGHT_LABEL[2] = {"Equal-Weighted", "#sqrt{E_{Beam}}-weighted"};
@@ -242,8 +232,7 @@ vector<double> features(const EventData& e, int method) {
 
 const char* p0Name(int mode) {
     if (mode==0) return "p0free";
-    if (mode==1) return "p0zero";
-    return "p0ridge";
+    return "p0zero";
 }
 
 Model fitModel(const vector<Sample>& train, int method, int weight, int p0mode,
@@ -280,12 +269,6 @@ Model fitModel(const vector<Sample>& train, int method, int weight, int p0mode,
         double w=(weight==1)?std::sqrt(e.beam):1.0;
         addRow(row,e.beam,w);
         m.nUsed++;
-    }
-    if (p0mode==2) {
-        // p0 ~ 0 constraint.  Equivalent to adding one pseudo-measurement p0=0.
-        // Weight = 1/sigma^2; with sigma=0.25 GeV it strongly discourages multi-GeV p0.
-        vector<double> row(k,0.0); row[0]=1.0;
-        addRow(row,0.0,1.0/(P0_RIDGE_SIGMA_GEV*P0_RIDGE_SIGMA_GEV));
     }
     if (m.nUsed < k+10) { printf("[WARN] not enough rows %s m%d w%d %s\n", tag.c_str(), method, weight, p0Name(p0mode)); return m; }
     TDecompSVD svd(A); Bool_t ok=kTRUE; TVectorD sol=svd.Solve(b,ok);
@@ -422,9 +405,9 @@ void zdc_make_graphs_v5(const char* inputDir="data", const char* outDir="plots",
     vector<Sample> gammaAll, neutronAll; loadAll(inputDir,"gamma",gammaAll); loadAll(inputDir,"neutron",neutronAll); writeInputCsv(qaDir,gammaAll,neutronAll);
     vector<Sample> gammaMain=filterE(gammaAll,GAMMA_MAIN_MIN_GEV,GAMMA_MAIN_MAX_GEV);
     vector<Sample> neutronEval=filterE(neutronAll,NEUTRON_EVAL_MIN_GEV,NEUTRON_EVAL_MAX_GEV);
-    vector<Sample> neutronTrain=filterE(neutronAll,0.0,NEUTRON_EVAL_MAX_GEV); // preserve old macro behavior: 10 GeV can help train, but not main eval.
-    printf("[WINDOW] gamma main train/eval [1,40] = %zu / all %zu\n",gammaMain.size(),gammaAll.size());
-    printf("[WINDOW] neutron train all <=300 = %zu, eval [20,300] = %zu / all %zu\n",neutronTrain.size(),neutronEval.size(),neutronAll.size());
+    vector<Sample> neutronTrain=filterE(neutronAll,0.0,NEUTRON_EVAL_MAX_GEV);
+    printf("[WINDOW] gamma train/eval all = %zu\n",gammaMain.size());
+    printf("[WINDOW] neutron train all = %zu, eval all = %zu\n",neutronTrain.size(),neutronEval.size());
 
     std::ofstream pcsv(Form("%s/regression_params.csv",qaDir));
     pcsv<<"tag,p0mode,method,weight,nUsed,p0,raw_c1,raw_c2,raw_c3,raw_c4\n";
@@ -435,8 +418,8 @@ void zdc_make_graphs_v5(const char* inputDir="data", const char* outDir="plots",
     TDirectory* dMain=fout->mkdir("01_main_graphs"); dMain->cd();
     TCanvas* dump=makeEnergyDump(gammaMain,neutronEval); dump->SaveAs(Form("%s/energy_dump.png",outDir));
 
-    int modes[3]={0,1,2};
-    for(int im=0;im<3;++im){ int p0mode=modes[im];
+    int modes[2]={0,1};  // p0free and p0zero only; p0ridge removed
+    for(int im=0;im<2;++im){ int p0mode=modes[im];
         std::map<string,TGraphErrors*> gr,gb,nr,nb;
         TDirectory* dg=fout->mkdir(Form("02_gamma_%s",p0Name(p0mode)));
         processOneMode(Form("main_%s",p0Name(p0mode)),"gamma",gammaMain,gammaMain,p0mode,dg,pcsv,mcsv,gr,gb);
@@ -447,10 +430,7 @@ void zdc_make_graphs_v5(const char* inputDir="data", const char* outDir="plots",
         if(!neutronEval.empty()){ TCanvas*c=makeResBiasCanvas("neutron",Form("c_neutron_resolution_bias_%s",p0Name(p0mode)),Form("Neutron Beam Energy Regression (%s)",p0Name(p0mode)),nr,nb,310); c->SaveAs(Form("%s/neutron_resolution_bias_%s.png",outDir,p0Name(p0mode))); }
     }
 
-    // All data QA: this keeps MeV gamma and any lower-energy neutron outputs without contaminating main plots.
-    TDirectory* qaAll=fout->mkdir("04_QA_all_raw_data_kept"); qaAll->cd();
-    // raw data summary graphs only; regression all-data can be added if needed, but the main CSV keeps every file.
     fout->Write(); fout->Close(); pcsv.close(); mcsv.close();
     printf("[DONE] %s/energy_reconstruction_graphs_v5.root\n",outDir);
-    printf("[DONE] compare p0free, p0zero, p0ridge PNGs in %s/\n",outDir);
+    printf("[DONE] compare p0free, p0zero PNGs in %s/\n",outDir);
 }

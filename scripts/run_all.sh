@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# v5 regression-fix runner. Run from repo root:
+# Main runner: generates all slide PNGs from raw outfile_*.root data.
+# Run from repo root:
 #   bash scripts/run_all.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -13,16 +14,17 @@ if ! command -v root >/dev/null 2>&1; then
   echo "[ERROR] ROOT is not on PATH. Run: source /path/to/root/bin/thisroot.sh" >&2
   exit 1
 fi
-root -l -q 'scripts/zdc_make_graphs_v5.C("data","plots","qa")'
+
+# Main slide generator (slides 5-8 PNGs + TBrowser ROOT file)
+root -l -q 'scripts/zdc_reco_browser.C("data","plots")'
+
 echo ""
-echo "Done. Open with:"
-echo "  root -l plots/energy_reconstruction_graphs_v5.root"
+echo "Done. Slide PNGs:"
+echo "  plots/slide5_energy_dump.png"
+echo "  plots/slide6_1GeV_gamma_regression.png"
+echo "  plots/slide7_gamma_resolution_bias.png"
+echo "  plots/slide8_neutron_resolution_bias.png"
+echo ""
+echo "TBrowser (inspect all canvases + histograms):"
+echo "  root -l plots/energy_reconstruction_browser.root"
 echo "  new TBrowser"
-echo ""
-echo "Main comparison canvases:"
-echo "  01_main_graphs/c_gamma_resolution_bias_p0free"
-echo "  01_main_graphs/c_gamma_resolution_bias_p0zero"
-echo "  01_main_graphs/c_gamma_resolution_bias_p0ridge"
-echo "  01_main_graphs/c_neutron_resolution_bias_p0free"
-echo "  01_main_graphs/c_neutron_resolution_bias_p0zero"
-echo "  01_main_graphs/c_neutron_resolution_bias_p0ridge"

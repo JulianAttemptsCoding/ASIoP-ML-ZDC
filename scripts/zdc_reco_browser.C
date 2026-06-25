@@ -50,10 +50,11 @@ using std::vector;
 
 // ----------------------------- user-facing knobs -----------------------------
 static const int    NBINS_RATIO_GAMMA   = 100;
-static const int    NBINS_RATIO_NEUTRON = 120;
+static const int    NBINS_RATIO_NEUTRON = 150;
 static const double RATIO_XMIN          = 0.0;
 static const double RATIO_XMAX_GAMMA    = 2.0;
-static const double RATIO_XMAX_NEUTRON  = 2.5;
+static const double RATIO_XMAX_NEUTRON  = 5.0;   // was 2.5; neutron ratio can be very large at low E
+static const double VIS_CUT_FRAC        = 0.001; // exclude events with <0.1% visible energy/beam
 
 // Method labels: match slide 6 wording.
 static const char* METHOD_LABEL[3] = {"Linear Fun.", "Ratio Fun.", "Quadratic Fun."};
@@ -282,12 +283,14 @@ vector<double> featureVector(const EventData& e, int method) {
     const double tot = e.ecal + e.hcal;
     if (method == 0) return {1.0, e.ecal, e.hcal};
     if (method == 1) return {1.0, e.ecal, e.hcal, (tot > 1e-12 ? e.hcal/tot : 0.0)};
-    // Slide 6 quadratic form: E_rec = p0 + p1*E_ECAL^2 + p2*E_HCAL^2
-    return {1.0, e.ecal*e.ecal, e.hcal*e.hcal};
+    // Full quadratic with linear terms: E_rec = p0 + p1*E_ECAL + p2*E_HCAL + p3*E_ECAL^2 + p4*E_HCAL^2
+    // Old form {1, ecal^2, hcal^2} lacked linear terms — feature values span
+    // 3+ orders of magnitude across neutron energy range, causing regression blow-up.
+    return {1.0, e.ecal, e.hcal, e.ecal*e.ecal, e.hcal*e.hcal};
 }
 
 bool fitRegression(const vector<Sample>& samples, int method, int weightMode, vector<double>& params) {
-    const int k = (method == 1) ? 4 : 3;
+    const int k = (method == 0) ? 3 : (method == 1) ? 4 : 5;
     TMatrixD normal(k, k);
     TVectorD rhs(k);
     int nUsed = 0;
@@ -330,7 +333,7 @@ double applyReco(const EventData& e, int method, const vector<double>& p) {
     const double tot = e.ecal + e.hcal;
     if (method == 0) return p[0] + p[1]*e.ecal + p[2]*e.hcal;
     if (method == 1) return p[0] + p[1]*e.ecal + p[2]*e.hcal + p[3]*(tot > 1e-12 ? e.hcal/tot : 0.0);
-    return p[0] + p[1]*e.ecal*e.ecal + p[2]*e.hcal*e.hcal;
+    return p[0] + p[1]*e.ecal + p[2]*e.hcal + p[3]*e.ecal*e.ecal + p[4]*e.hcal*e.hcal;
 }
 
 bool fitRatioDCB(TH1D* h, const vector<double>& ratios,
@@ -356,7 +359,7 @@ bool fitRatioDCB(TH1D* h, const vector<double>& ratios,
     dcb->SetParameters(rMu, TMath::Max(rSig, 0.003), 1.5, 3.0, 1.8, 3.0, h->GetMaximum());
     dcb->SetParLimits(0, TMath::Max(xmin, rMu - TMath::Max(0.12, 3.0*rSig)),
                          TMath::Min(xmax, rMu + TMath::Max(0.12, 3.0*rSig)));
-    dcb->SetParLimits(1, 0.001, TMath::Min(0.60, TMath::Max(0.08, 5.0*rSig)));
+    dcb->SetParLimits(1, 0.001, TMath::Min(2.00, TMath::Max(0.08, 5.0*rSig))); // was 0.60; neutron reso can exceed 80%
     dcb->SetParLimits(2, 0.35, 6.0);
     dcb->SetParLimits(3, 1.10, 30.0);
     dcb->SetParLimits(4, 0.35, 6.0);
@@ -410,6 +413,11 @@ vector<RecoMetrics> buildRecoMetrics(const vector<Sample>& samples,
         vector<double> ratios;
         ratios.reserve(s.events.size());
         for (const auto& e : s.events) {
+            // Skip zero-deposit events: without this cut, every null event predicts
+            // E_rec = p0 (the intercept), creating a delta spike at p0/E_beam
+            // that dominates sigma and causes artificial volatility in the resolution graph.
+            const double vis = e.ecal + e.hcal;
+            if (vis < VIS_CUT_FRAC * e.beam) continue;
             const double rec = applyReco(e, method, params);
             const double ratio = rec / e.beam;
             if (std::isfinite(ratio)) { h->Fill(ratio); ratios.push_back(ratio); }
@@ -670,10 +678,10 @@ TCanvas* makeEnergyDumpCanvas(const vector<Sample>& gammaSamples, const vector<S
         pads[i] = new TPad(Form("pad_dump_top_%d",i), "", x1[i], yTop1, x2[i], yTop2); pads[i]->Draw();
         pads[i+3] = new TPad(Form("pad_dump_bot_%d",i), "", x1[i], yBot1, x2[i], yBot2); pads[i+3]->Draw();
     }
-    pads[0]->cd(); drawSingleDumpPad(gGE, "Beam VS ECAL/Beam", "ECal / Beam", "1 - 40 GeV Gamma", 50.0, 0.60);
+    pads[0]->cd(); drawSingleDumpPad(gGE, "Beam VS ECAL/Beam", "ECal / Beam", "Gamma (all energies)", 50.0, 0.60);
     pads[1]->cd(); drawSingleDumpPad(gGH, "Beam VS HCAL/Beam", "HCal / Beam", "", 50.0, 0.020);
     pads[2]->cd(); drawSingleDumpPad(gGA, "Beam VS\n(ECAL + HCAL)/Beam", "(ECal + HCal) / Beam", "", 50.0, 0.60);
-    pads[3]->cd(); drawSingleDumpPad(gNE, "", "ECal / Beam", "20 - 300 GeV Neutron", 350.0, 0.070);
+    pads[3]->cd(); drawSingleDumpPad(gNE, "", "ECal / Beam", "Neutron (all energies)", 350.0, 0.070);
     pads[4]->cd(); drawSingleDumpPad(gNH, "", "HCal / Beam", "", 350.0, 0.022);
     pads[5]->cd(); drawSingleDumpPad(gNA, "", "(ECal + HCal) / Beam", "", 350.0, 0.070);
 
@@ -681,8 +689,8 @@ TCanvas* makeEnergyDumpCanvas(const vector<Sample>& gammaSamples, const vector<S
     TLine* sep = new TLine(0.04, 0.515, 0.96, 0.515); sep->SetNDC(kTRUE); sep->SetLineWidth(3); sep->Draw();
     lightBlueBox(0.10,0.065,0.92,0.145);
     TLatex tx; tx.SetNDC(); tx.SetTextFont(42); tx.SetTextSize(0.022); tx.SetTextColor(kBlack);
-    tx.DrawLatex(0.125,0.115,"#bullet   1 - 40 GeV gamma beam : Most of energy dumped in ECAL ~ 20% to 60%.");
-    tx.DrawLatex(0.125,0.085,"#bullet   20 - 300 GeV neutron beam : Not much energy dumped in scintillator tile, only 3% to 6%.");
+    tx.DrawLatex(0.125,0.115,"#bullet   Gamma beam (0.1#minus40 GeV) : Most of energy dumped in ECAL ~ 20% to 60%.");
+    tx.DrawLatex(0.125,0.085,"#bullet   Neutron beam (all energies) : Not much energy dumped in scintillator tile, only 3% to 6%.");
     drawFooterText("5/18");
 
     c->Write();
@@ -809,12 +817,12 @@ TCanvas* makeResolutionBiasCanvas(const string& particle,
     mgR->Draw("AP");
     mgR->GetXaxis()->SetTitle("Energy (GeV)");
     mgR->GetYaxis()->SetTitle("Energy Resolution (%)");
-    mgR->GetYaxis()->SetRangeUser(0.0, 0.30);
-    mgR->GetXaxis()->SetLimits(gamma ? 0.0 : 0.0, gamma ? 42.0 : 310.0);
+    mgR->GetYaxis()->SetRangeUser(0.0, gamma ? 0.30 : 1.00); // neutron resolution can exceed 80% at low energy
+    mgR->GetXaxis()->SetLimits(0.0, gamma ? 42.0 : 320.0);
     mgR->GetXaxis()->SetTitleSize(0.050); mgR->GetYaxis()->SetTitleSize(0.050);
     mgR->GetXaxis()->SetLabelSize(0.041); mgR->GetYaxis()->SetLabelSize(0.041);
     mgR->GetYaxis()->SetTitleOffset(1.15);
-    drawRequirementCurves(particle, gamma ? 1.0 : 20.0, gamma ? 42.0 : 310.0);
+    drawRequirementCurves(particle, gamma ? 1.0 : 20.0, gamma ? 42.0 : 320.0);
     legR->Draw();
 
     right->cd();
@@ -833,12 +841,12 @@ TCanvas* makeResolutionBiasCanvas(const string& particle,
     mgB->Draw("AP");
     mgB->GetXaxis()->SetTitle("Energy (GeV)");
     mgB->GetYaxis()->SetTitle("E_{rec}/E_{beam}");
-    mgB->GetYaxis()->SetRangeUser(0.80, gamma ? 1.20 : 1.50);
-    mgB->GetXaxis()->SetLimits(0.0, gamma ? 42.0 : 310.0);
+    mgB->GetYaxis()->SetRangeUser(gamma ? 0.80 : 0.0, gamma ? 1.20 : 3.00); // neutron bias can be far from 1
+    mgB->GetXaxis()->SetLimits(0.0, gamma ? 42.0 : 320.0);
     mgB->GetXaxis()->SetTitleSize(0.050); mgB->GetYaxis()->SetTitleSize(0.050);
     mgB->GetXaxis()->SetLabelSize(0.041); mgB->GetYaxis()->SetLabelSize(0.041);
     mgB->GetYaxis()->SetTitleOffset(1.15);
-    TLine* one = new TLine(0.0, 1.0, gamma ? 42.0 : 310.0, 1.0);
+    TLine* one = new TLine(0.0, 1.0, gamma ? 42.0 : 320.0, 1.0);
     one->SetLineColor(kBlack); one->SetLineStyle(2); one->SetLineWidth(1); one->Draw("SAME");
     legB->Draw();
 
@@ -846,7 +854,7 @@ TCanvas* makeResolutionBiasCanvas(const string& particle,
     lightBlueBox(gamma ? 0.140 : 0.055, 0.085, gamma ? 0.890 : 0.960, gamma ? 0.205 : 0.235);
     TLatex bt; bt.SetNDC(); bt.SetTextFont(42); bt.SetTextSize(0.021); bt.SetTextColor(kBlack);
     if (gamma) {
-        bt.SetTextFont(62); bt.DrawLatex(0.155,0.180,"1#minus40 GeV Gamma Beam"); bt.SetTextFont(42);
+        bt.SetTextFont(62); bt.DrawLatex(0.155,0.180,"0.1#minus40 GeV Gamma Beam"); bt.SetTextFont(42);
         bt.DrawLatex(0.155,0.155,"#bullet   Method : Sqrt(Ebeam) weighting performs best. insensitive to fitting function.");
         bt.DrawLatex(0.155,0.130,"#bullet   Resolution: Performance requirements fully satisfied.");
         bt.DrawLatex(0.155,0.105,"#bullet   Bias: Negligible energy bias observed.");
@@ -925,12 +933,11 @@ void zdc_reco_browser(const char* inputDir="data", const char* outDir="plots") {
     }
     summary->Write();
 
-    // PDF-matching slides use the same visible energy windows as slides 5, 7, and 8:
-    // gamma 1-40 GeV and neutron 20-300 GeV. Sub-GeV gamma and 10 GeV neutron are
-    // still processed in the *_all directories below, but they are not injected into
-    // the PDF-style summary canvases where they collapse the x-axis near zero.
-    vector<Sample> gammaSlideSamples  = filterSamples(gammaSamples,  0.999, 40.5);
-    vector<Sample> neutronSlideSamples = filterSamples(neutronSamples, 19.5, 300.5);
+    // Use all available data — no energy-window filtering.
+    // Old windows [1,40] GeV gamma / [20,300] GeV neutron excluded MeV gammas and
+    // low-energy neutrons. Including all data shows the full resolution picture.
+    vector<Sample> gammaSlideSamples  = gammaSamples;
+    vector<Sample> neutronSlideSamples = neutronSamples;
 
     fout->cd();
     if (!gammaSlideSamples.empty() || !neutronSlideSamples.empty()) {
