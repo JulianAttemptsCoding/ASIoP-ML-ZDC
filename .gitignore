@@ -2,6 +2,9 @@
 # Store locally only; regenerate from steering_*.py if needed
 outfile_*.root
 
+# Regenerable analysis archive (TBrowser QA file); rebuild with scripts/run_all.sh
+qa/*.root
+
 # Unix NFS lock files
 .nfs*
 

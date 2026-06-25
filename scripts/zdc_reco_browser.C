@@ -289,10 +289,19 @@ vector<double> featureVector(const EventData& e, int method) {
     return {1.0, e.ecal, e.hcal, e.ecal*e.ecal, e.hcal*e.hcal};
 }
 
+// Force the regression through the origin: p0 (the constant feature) is dropped from the
+// basis so E_rec = 0 when no energy is deposited. A free intercept produced a large
+// positive p0 (~15-31 GeV for neutron) that made low-energy beams reconstruct far too
+// high (bias up to 2.6) and inflated the plotted resolution. Physically the calorimeter
+// response must pass through zero, so p0 = 0 is the correct constraint.
+static const bool ZERO_INTERCEPT = true;
+
 bool fitRegression(const vector<Sample>& samples, int method, int weightMode, vector<double>& params) {
     const int k = (method == 0) ? 3 : (method == 1) ? 4 : 5;
-    TMatrixD normal(k, k);
-    TVectorD rhs(k);
+    const int start = ZERO_INTERCEPT ? 1 : 0;   // skip the constant term when forcing p0=0
+    const int kk = k - start;
+    TMatrixD normal(kk, kk);
+    TVectorD rhs(kk);
     int nUsed = 0;
 
     for (const auto& s : samples) {
@@ -301,16 +310,16 @@ bool fitRegression(const vector<Sample>& samples, int method, int weightMode, ve
             if (!std::isfinite(vis) || vis <= 0.0) continue;
             vector<double> x = featureVector(e, method);
             const double w = (weightMode == 1) ? std::sqrt(e.beam) : 1.0;  // exactly as slide 6
-            for (int i = 0; i < k; ++i) {
-                rhs(i) += w * x[i] * e.beam;
-                for (int j = 0; j < k; ++j) normal(i,j) += w * x[i] * x[j];
+            for (int i = 0; i < kk; ++i) {
+                rhs(i) += w * x[i+start] * e.beam;
+                for (int j = 0; j < kk; ++j) normal(i,j) += w * x[i+start] * x[j+start];
             }
             ++nUsed;
         }
     }
 
-    params.assign(k, 0.0);
-    if (nUsed < k + 5) {
+    params.assign(k, 0.0);   // params[0] stays 0 when ZERO_INTERCEPT; applyReco still uses p[0]
+    if (nUsed < kk + 5) {
         printf("[WARN] Not enough events for regression m%d_w%d; used=%d\n", method, weightMode, nUsed);
         return false;
     }
@@ -321,9 +330,9 @@ bool fitRegression(const vector<Sample>& samples, int method, int weightMode, ve
         printf("[WARN] SVD solve failed for regression m%d_w%d\n", method, weightMode);
         return false;
     }
-    for (int i = 0; i < k; ++i) params[i] = sol(i);
+    for (int i = 0; i < kk; ++i) params[i+start] = sol(i);
 
-    printf("[FIT] m%d_w%d params:", method, weightMode);
+    printf("[FIT] m%d_w%d params (p0=%s):", method, weightMode, ZERO_INTERCEPT ? "0 fixed" : "free");
     for (double v : params) printf(" %.6g", v);
     printf("\n");
     return true;
@@ -1019,7 +1028,7 @@ TCanvas* makeCleanResolutionBiasCanvas(const string& particle,
     mgB->Draw("AP");
     mgB->GetXaxis()->SetTitle("E_{beam} (GeV)");
     mgB->GetYaxis()->SetTitle("E_{rec} / E_{beam}");
-    mgB->GetYaxis()->SetRangeUser(0.80, gamma ? 1.20 : 1.50); // match reference slides 7/8
+    mgB->GetYaxis()->SetRangeUser(0.80, gamma ? 1.20 : 1.30); // p0=0 keeps neutron bias near 1
     mgB->GetXaxis()->SetLimits(0.0, xMax);
     mgB->GetXaxis()->SetTitleSize(0.05); mgB->GetYaxis()->SetTitleSize(0.05);
     mgB->GetXaxis()->SetLabelSize(0.043); mgB->GetYaxis()->SetLabelSize(0.043);
@@ -1055,7 +1064,9 @@ void writeAllHistCanvases(const string& particle,
 void zdc_reco_browser(const char* inputDir="data", const char* outDir="plots") {
     setGlobalStyle();
     ensureDir(outDir);
-    const TString outRoot = TString::Format("%s/energy_reconstruction_browser.root", outDir);
+    ensureDir("qa");
+    // Analysis archive lives in qa/, not plots/ -- plots/ holds only the final graph PNGs.
+    const TString outRoot = "qa/energy_reconstruction_browser.root";
 
     vector<Sample> gammaSamples, neutronSamples;
     loadAllSamples(inputDir, "gamma", gammaSamples);
@@ -1090,88 +1101,6 @@ void zdc_reco_browser(const char* inputDir="data", const char* outDir="plots") {
         Emean = s.beamMean; Erms = s.beamRMS; entries = (int)s.events.size(); summary->Fill();
     }
     summary->Write();
-
-    // Use all available data — no energy-window filtering.
-    // Old windows [1,40] GeV gamma / [20,300] GeV neutron excluded MeV gammas and
-    // low-energy neutrons. Including all data shows the full resolution picture.
-    vector<Sample> gammaSlideSamples  = gammaSamples;
-    vector<Sample> neutronSlideSamples = neutronSamples;
-
-    fout->cd();
-    if (!gammaSlideSamples.empty() || !neutronSlideSamples.empty()) {
-        TDirectory* dSlides = fout->mkdir("01_pdf_style_slides");
-        dSlides->cd();
-        TCanvas* c5 = makeEnergyDumpCanvas(gammaSlideSamples, neutronSlideSamples);
-        c5->SaveAs(TString::Format("%s/slide5_energy_dump.png", outDir));
-        c5->SaveAs(TString::Format("%s/slide5_energy_dump.pdf", outDir));
-        fout->cd();
-    }
-
-    auto processParticle = [&](const string& part, const string& dirName, const vector<Sample>& samples,
-                               std::map<string,TGraphErrors*>& outResGraphs,
-                               std::map<string,TGraphErrors*>& outBiasGraphs,
-                               std::map<string, vector<RecoMetrics>>& metricStore) {
-        if (samples.empty()) return;
-        TDirectory* dPart = fout->mkdir(dirName.c_str());
-        dPart->cd();
-        for (int m = 0; m < 3; ++m) {
-            for (int w = 0; w < 2; ++w) {
-                vector<double> params;
-                fitRegression(samples, m, w, params);
-                vector<RecoMetrics> metrics = buildRecoMetrics(samples, params, m, w, part);
-                const string key = Form("%s_m%d_w%d", part.c_str(), m, w);
-                metricStore[Form("m%d_w%d", m, w)] = metrics;
-
-                TGraphErrors* gr = makeGraph(metrics, true,  Form("gReso_dcb_%s_m%d_w%d", part.c_str(), m, w));
-                TGraphErrors* gb = makeGraph(metrics, false, Form("gBias_dcb_%s_m%d_w%d", part.c_str(), m, w));
-                outResGraphs[key] = gr;
-                outBiasGraphs[key] = gb;
-                dPart->cd();
-                gr->Write(); gb->Write();
-                for (auto& met : metrics) {
-                    if (met.hist) met.hist->Write();
-                    if (met.fit)  met.fit->Write();
-                }
-            }
-        }
-        writeAllHistCanvases(part, metricStore);
-        fout->cd();
-    };
-
-    // Full processing: every uploaded raw energy goes into the TBrowser file.
-    std::map<string,TGraphErrors*> resGraphsAll;
-    std::map<string,TGraphErrors*> biasGraphsAll;
-    std::map<string, vector<RecoMetrics>> gammaMetricsAll;
-    std::map<string, vector<RecoMetrics>> neutronMetricsAll;
-    processParticle("gamma",   "02_gamma_all_raw_energies",   gammaSamples,   resGraphsAll, biasGraphsAll, gammaMetricsAll);
-    processParticle("neutron", "03_neutron_all_raw_energies", neutronSamples, resGraphsAll, biasGraphsAll, neutronMetricsAll);
-
-    // Slide processing: fit and summarize only the energy windows shown in the reference PDF.
-    std::map<string,TGraphErrors*> resGraphsSlide;
-    std::map<string,TGraphErrors*> biasGraphsSlide;
-    std::map<string, vector<RecoMetrics>> gammaMetricsSlide;
-    std::map<string, vector<RecoMetrics>> neutronMetricsSlide;
-    processParticle("gamma",   "04_gamma_slide_window_1to40GeV",    gammaSlideSamples,   resGraphsSlide, biasGraphsSlide, gammaMetricsSlide);
-    processParticle("neutron", "05_neutron_slide_window_20to300GeV", neutronSlideSamples, resGraphsSlide, biasGraphsSlide, neutronMetricsSlide);
-
-    fout->cd("01_pdf_style_slides");
-    if (!gammaMetricsSlide.empty() && gammaMetricsSlide.count("m0_w1")) {
-        TCanvas* c6 = makeSlide6Canvas(gammaMetricsSlide["m0_w1"]);
-        if (c6) {
-            c6->SaveAs(TString::Format("%s/slide6_1GeV_gamma_regression.png", outDir));
-            c6->SaveAs(TString::Format("%s/slide6_1GeV_gamma_regression.pdf", outDir));
-        }
-    }
-    if (!gammaSlideSamples.empty()) {
-        TCanvas* c7 = makeResolutionBiasCanvas("gamma", resGraphsSlide, biasGraphsSlide);
-        c7->SaveAs(TString::Format("%s/slide7_gamma_resolution_bias.png", outDir));
-        c7->SaveAs(TString::Format("%s/slide7_gamma_resolution_bias.pdf", outDir));
-    }
-    if (!neutronSlideSamples.empty()) {
-        TCanvas* c8 = makeResolutionBiasCanvas("neutron", resGraphsSlide, biasGraphsSlide);
-        c8->SaveAs(TString::Format("%s/slide8_neutron_resolution_bias.png", outDir));
-        c8->SaveAs(TString::Format("%s/slide8_neutron_resolution_bias.pdf", outDir));
-    }
 
     // ---- Clean physics graphs (no slide decorations) ----
     // Gamma: train regression on [1,40] GeV for stable parameters; evaluate on ALL gamma energies
@@ -1228,8 +1157,6 @@ void zdc_reco_browser(const char* inputDir="data", const char* outDir="plots") {
     fout->Write();
     fout->Close();
 
-    printf("\n[DONE] Wrote ROOT/TBrowser file: %s\n", outRoot.Data());
-    printf("[DONE] Wrote PNG/PDF plots under: %s\n", outDir);
-    printf("[OPEN] root -l %s\n", outRoot.Data());
-    printf("       new TBrowser\n");
+    printf("\n[DONE] Graph PNGs in %s/: energy_dump.png, gamma_resolution_bias.png, neutron_resolution_bias.png\n", outDir);
+    printf("[DONE] Analysis archive (optional, for TBrowser QA): %s\n", outRoot.Data());
 }

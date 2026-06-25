@@ -15,16 +15,13 @@ if ! command -v root >/dev/null 2>&1; then
   exit 1
 fi
 
-# Main slide generator (slides 5-8 PNGs + TBrowser ROOT file)
+# Generate the three clean physics graphs (no slides).
 root -l -q 'scripts/zdc_reco_browser.C("data","plots")'
 
 echo ""
-echo "Done. Slide PNGs:"
-echo "  plots/slide5_energy_dump.png"
-echo "  plots/slide6_1GeV_gamma_regression.png"
-echo "  plots/slide7_gamma_resolution_bias.png"
-echo "  plots/slide8_neutron_resolution_bias.png"
+echo "Done. Graphs:"
+echo "  plots/energy_dump.png"
+echo "  plots/gamma_resolution_bias.png"
+echo "  plots/neutron_resolution_bias.png"
 echo ""
-echo "TBrowser (inspect all canvases + histograms):"
-echo "  root -l plots/energy_reconstruction_browser.root"
-echo "  new TBrowser"
+echo "Analysis archive (optional QA, not a plot): qa/energy_reconstruction_browser.root"
