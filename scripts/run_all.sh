@@ -1,22 +1,28 @@
-#!/bin/bash
-# run_all.sh — regenerate all energy reconstruction plots
-# Run from repo root in WSL: bash scripts/run_all.sh
-# Requires ROOT via: source /home/ulia/root/bin/thisroot.sh
-
-set -e
-source /home/ulia/root/bin/thisroot.sh
-
-mkdir -p plots
-
-echo "=== Slide 5: Energy Dump ==="
-root -b -q 'scripts/plot_slide5_energy_dump.C'
-
-echo "=== Slide 6: E_rec/E_beam distribution (1 GeV gamma) ==="
-root -b -q 'scripts/plot_slide6_erec_dist.C'
-
-echo "=== Slides 7-8: Resolution + Bias vs Energy ==="
-root -b -q 'scripts/plot_slide7_8_resolution.C'
-
+#!/usr/bin/env bash
+# v5 regression-fix runner. Run from repo root:
+#   bash scripts/run_all.sh
+set -euo pipefail
+cd "$(dirname "$0")/.."
+mkdir -p plots qa
+if ! command -v root >/dev/null 2>&1; then
+  if [ -f /home/ulia/root/bin/thisroot.sh ]; then
+    source /home/ulia/root/bin/thisroot.sh
+  fi
+fi
+if ! command -v root >/dev/null 2>&1; then
+  echo "[ERROR] ROOT is not on PATH. Run: source /path/to/root/bin/thisroot.sh" >&2
+  exit 1
+fi
+root -l -q 'scripts/zdc_make_graphs_v5.C("data","plots","qa")'
 echo ""
-echo "All plots saved to plots/"
-echo "Open plots/energy_reconstruction.root in ROOT TBrowser to browse all canvases."
+echo "Done. Open with:"
+echo "  root -l plots/energy_reconstruction_graphs_v5.root"
+echo "  new TBrowser"
+echo ""
+echo "Main comparison canvases:"
+echo "  01_main_graphs/c_gamma_resolution_bias_p0free"
+echo "  01_main_graphs/c_gamma_resolution_bias_p0zero"
+echo "  01_main_graphs/c_gamma_resolution_bias_p0ridge"
+echo "  01_main_graphs/c_neutron_resolution_bias_p0free"
+echo "  01_main_graphs/c_neutron_resolution_bias_p0zero"
+echo "  01_main_graphs/c_neutron_resolution_bias_p0ridge"
