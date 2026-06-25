@@ -873,6 +873,126 @@ TCanvas* makeResolutionBiasCanvas(const string& particle,
     return c;
 }
 
+TCanvas* makeCleanEnergyDumpCanvas(const vector<Sample>& gammaSamples,
+                                    const vector<Sample>& neutronSamples) {
+    TCanvas* c = new TCanvas("c_clean_energy_dump", "Energy Dump", 1500, 900);
+    c->SetFillColor(kWhite);
+    c->Divide(3, 2, 0.005, 0.005);
+
+    TGraphErrors* gs[6] = {
+        makeDumpGraph(gammaSamples,   0, "gDmpC_gE"),
+        makeDumpGraph(gammaSamples,   1, "gDmpC_gH"),
+        makeDumpGraph(gammaSamples,   2, "gDmpC_gA"),
+        makeDumpGraph(neutronSamples, 0, "gDmpC_nE"),
+        makeDumpGraph(neutronSamples, 1, "gDmpC_nH"),
+        makeDumpGraph(neutronSamples, 2, "gDmpC_nA"),
+    };
+    const char* titles[6] = {
+        "#gamma: ECAL/Beam;E_{beam} (GeV);ECal/Beam",
+        "#gamma: HCAL/Beam;E_{beam} (GeV);HCal/Beam",
+        "#gamma: (ECAL+HCAL)/Beam;E_{beam} (GeV);(ECal+HCal)/Beam",
+        "n: ECAL/Beam;E_{beam} (GeV);ECal/Beam",
+        "n: HCAL/Beam;E_{beam} (GeV);HCal/Beam",
+        "n: (ECAL+HCAL)/Beam;E_{beam} (GeV);(ECal+HCal)/Beam",
+    };
+    const double xMax[6] = {50,50,50,350,350,350};
+    const double yMax[6] = {0.60,0.020,0.60,0.070,0.022,0.070};
+
+    for (int i = 0; i < 6; ++i) {
+        c->cd(i+1); stylePad(0.17, 0.15, 0.04, 0.08);
+        if (!gs[i] || gs[i]->GetN() == 0) continue;
+        gs[i]->SetTitle(titles[i]);
+        gs[i]->Draw("AP");
+        gs[i]->GetXaxis()->SetLimits(0.0, xMax[i]);
+        gs[i]->GetYaxis()->SetRangeUser(0.0, yMax[i]);
+        gs[i]->GetXaxis()->SetTitleSize(0.048);
+        gs[i]->GetYaxis()->SetTitleSize(0.048);
+        gs[i]->GetXaxis()->SetLabelSize(0.042);
+        gs[i]->GetYaxis()->SetLabelSize(0.042);
+        gs[i]->GetYaxis()->SetTitleOffset(1.30);
+    }
+    return c;
+}
+
+TCanvas* makeCleanResolutionBiasCanvas(const string& particle,
+                                        std::map<string,TGraphErrors*>& resGraphs,
+                                        std::map<string,TGraphErrors*>& biasGraphs,
+                                        const char* cname) {
+    const bool   gamma = (particle == "gamma");
+    const double xMax  = gamma ? 42.0 : 320.0;
+    const double rqX0  = gamma ?  0.5 :  10.0;
+    const double oldA  = gamma ? 0.35 :  0.50;
+    const double newA  = gamma ? 0.20 :  0.35;
+
+    TCanvas* c = new TCanvas(cname, Form("%s Resolution & Bias", particle.c_str()), 1400, 620);
+    c->SetFillColor(kWhite);
+    TPad* pL = new TPad(Form("%s_L", cname), "", 0.01, 0.0, 0.50, 1.0);
+    TPad* pR = new TPad(Form("%s_R", cname), "", 0.51, 0.0, 1.00, 1.0);
+    pL->Draw(); pR->Draw();
+
+    CurveDef curves[6] = {
+        {0,0,kRed+1,   kFullCircle}, {1,0,kRed+1,   kOpenCircle}, {2,0,kRed+1,   kFullSquare},
+        {0,1,kGreen+2, kFullCircle}, {1,1,kGreen+2, kOpenCircle}, {2,1,kGreen+2, kFullSquare}
+    };
+
+    pL->cd(); stylePad(0.17, 0.14, 0.03, 0.07);
+    TMultiGraph* mgR = new TMultiGraph(Form("mgR_cln_%s", particle.c_str()), "");
+    TLegend* legR = new TLegend(0.37, 0.50, 0.97, 0.95);
+    legR->SetBorderSize(1); legR->SetFillColor(kWhite); legR->SetTextSize(0.026);
+    for (auto& cv : curves) {
+        const string key = Form("%s_m%d_w%d", particle.c_str(), cv.method, cv.weight);
+        auto it = resGraphs.find(key);
+        if (it == resGraphs.end() || !it->second || it->second->GetN()==0) continue;
+        TGraphErrors* g = it->second;
+        styleGraph(g, cv.color, cv.marker);
+        mgR->Add(g, "PL");
+        legR->AddEntry(g, Form("%s, %s", WEIGHT_LABEL[cv.weight], METHOD_LABEL[cv.method]), "pl");
+    }
+    TF1* reqOldR = new TF1(Form("reqOR_%s", cname), Form("%g/sqrt(x)+0.05", oldA), rqX0, xMax);
+    TF1* reqNewR = new TF1(Form("reqNR_%s", cname), Form("%g/sqrt(x)+0.05", newA), rqX0, xMax);
+    reqOldR->SetLineColor(kGray+2); reqOldR->SetLineWidth(2); reqOldR->SetLineStyle(7);
+    reqNewR->SetLineColor(kBlue+2); reqNewR->SetLineWidth(2); reqNewR->SetLineStyle(7);
+    mgR->Draw("AP");
+    mgR->GetXaxis()->SetTitle("E_{beam} (GeV)");
+    mgR->GetYaxis()->SetTitle("#sigma_{E} / E_{beam}");
+    mgR->GetYaxis()->SetRangeUser(0.0, gamma ? 0.25 : 0.60);
+    mgR->GetXaxis()->SetLimits(0.0, xMax);
+    mgR->GetXaxis()->SetTitleSize(0.05); mgR->GetYaxis()->SetTitleSize(0.05);
+    mgR->GetXaxis()->SetLabelSize(0.043); mgR->GetYaxis()->SetLabelSize(0.043);
+    mgR->GetYaxis()->SetTitleOffset(1.25);
+    reqOldR->Draw("SAME"); reqNewR->Draw("SAME");
+    legR->AddEntry(reqOldR, Form("Req. old: %.0f%%/#sqrt{E}+5%%", oldA*100), "l");
+    legR->AddEntry(reqNewR, Form("Req. new: %.0f%%/#sqrt{E}+5%%", newA*100), "l");
+    legR->Draw();
+
+    pR->cd(); stylePad(0.17, 0.14, 0.03, 0.07);
+    TMultiGraph* mgB = new TMultiGraph(Form("mgB_cln_%s", particle.c_str()), "");
+    TLegend* legB = new TLegend(0.37, 0.50, 0.97, 0.95);
+    legB->SetBorderSize(1); legB->SetFillColor(kWhite); legB->SetTextSize(0.026);
+    for (auto& cv : curves) {
+        const string key = Form("%s_m%d_w%d", particle.c_str(), cv.method, cv.weight);
+        auto it = biasGraphs.find(key);
+        if (it == biasGraphs.end() || !it->second || it->second->GetN()==0) continue;
+        TGraphErrors* g = it->second;
+        styleGraph(g, cv.color, cv.marker);
+        mgB->Add(g, "PL");
+        legB->AddEntry(g, Form("%s, %s", WEIGHT_LABEL[cv.weight], METHOD_LABEL[cv.method]), "pl");
+    }
+    mgB->Draw("AP");
+    mgB->GetXaxis()->SetTitle("E_{beam} (GeV)");
+    mgB->GetYaxis()->SetTitle("E_{rec} / E_{beam}");
+    mgB->GetYaxis()->SetRangeUser(gamma ? 0.75 : 0.3, gamma ? 1.25 : 2.5);
+    mgB->GetXaxis()->SetLimits(0.0, xMax);
+    mgB->GetXaxis()->SetTitleSize(0.05); mgB->GetYaxis()->SetTitleSize(0.05);
+    mgB->GetXaxis()->SetLabelSize(0.043); mgB->GetYaxis()->SetLabelSize(0.043);
+    mgB->GetYaxis()->SetTitleOffset(1.25);
+    TLine* one = new TLine(0.0, 1.0, xMax, 1.0);
+    one->SetLineColor(kBlack); one->SetLineStyle(2); one->SetLineWidth(1); one->Draw("SAME");
+    legB->Draw();
+
+    return c;
+}
+
 void writeAllHistCanvases(const string& particle,
                           const std::map<string, vector<RecoMetrics>>& allMetrics) {
     for (const auto& kv : allMetrics) {
@@ -1013,6 +1133,55 @@ void zdc_reco_browser(const char* inputDir="data", const char* outDir="plots") {
         TCanvas* c8 = makeResolutionBiasCanvas("neutron", resGraphsSlide, biasGraphsSlide);
         c8->SaveAs(TString::Format("%s/slide8_neutron_resolution_bias.png", outDir));
         c8->SaveAs(TString::Format("%s/slide8_neutron_resolution_bias.pdf", outDir));
+    }
+
+    // ---- Clean physics graphs (no slide decorations) ----
+    // Gamma: train regression on [1,40] GeV for stable parameters; evaluate on ALL gamma energies
+    // (100 MeV - 40 GeV) so the graph shows the full range including the sub-GeV extrapolation.
+    // Neutron: train and evaluate on all available energies.
+    {
+        vector<Sample> gammaTrainSamples = filterSamples(gammaSamples, 1.0, 40.0);
+        std::map<string,TGraphErrors*> resClnG, biasClnG, resClnN, biasClnN;
+
+        for (int m = 0; m < 3; ++m) {
+            for (int w = 0; w < 2; ++w) {
+                if (!gammaTrainSamples.empty() && !gammaSamples.empty()) {
+                    vector<double> params;
+                    fitRegression(gammaTrainSamples, m, w, params);
+                    vector<RecoMetrics> mets = buildRecoMetrics(gammaSamples, params, m, w, "gamma");
+                    const string key = Form("gamma_m%d_w%d", m, w);
+                    resClnG[key]  = makeGraph(mets, true,  Form("gR_cln_g_m%d_w%d", m, w));
+                    biasClnG[key] = makeGraph(mets, false, Form("gB_cln_g_m%d_w%d", m, w));
+                }
+                if (!neutronSamples.empty()) {
+                    vector<double> params;
+                    fitRegression(neutronSamples, m, w, params);
+                    vector<RecoMetrics> mets = buildRecoMetrics(neutronSamples, params, m, w, "neutron");
+                    const string key = Form("neutron_m%d_w%d", m, w);
+                    resClnN[key]  = makeGraph(mets, true,  Form("gR_cln_n_m%d_w%d", m, w));
+                    biasClnN[key] = makeGraph(mets, false, Form("gB_cln_n_m%d_w%d", m, w));
+                }
+            }
+        }
+
+        fout->cd();
+        TDirectory* dClean = fout->mkdir("06_clean_graphs");
+        dClean->cd();
+
+        TCanvas* cDump = makeCleanEnergyDumpCanvas(gammaSamples, neutronSamples);
+        cDump->SaveAs(TString::Format("%s/energy_dump.png", outDir));
+        cDump->Write();
+        if (!resClnG.empty()) {
+            TCanvas* cg = makeCleanResolutionBiasCanvas("gamma",   resClnG, biasClnG, "c_cln_gamma");
+            cg->SaveAs(TString::Format("%s/gamma_resolution_bias.png", outDir));
+            cg->Write();
+        }
+        if (!resClnN.empty()) {
+            TCanvas* cn = makeCleanResolutionBiasCanvas("neutron", resClnN, biasClnN, "c_cln_neutron");
+            cn->SaveAs(TString::Format("%s/neutron_resolution_bias.png", outDir));
+            cn->Write();
+        }
+        fout->cd();
     }
 
     fout->Write();
