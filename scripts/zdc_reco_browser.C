@@ -1074,6 +1074,10 @@ TCanvas* makeCleanResolutionBiasCanvas(const string& particle,
     TLegend* legR = new TLegend(0.37, 0.50, 0.97, 0.95);
     legR->SetBorderSize(1); legR->SetFillColor(kWhite); legR->SetTextSize(0.026);
     for (auto& cv : curves) {
+        // Ratio method (m1) is degenerate for neutrons: ecal≈0 in almost every event,
+        // so hcal/(ecal+hcal)→1 (constant), making p3 a hidden intercept that
+        // undermines ZERO_INTERCEPT and creates a bimodal E_rec/E_beam at ~50 GeV.
+        if (!gamma && cv.method == 1) continue;
         const string key = Form("%s_m%d_w%d", particle.c_str(), cv.method, cv.weight);
         auto it = resGraphs.find(key);
         if (it == resGraphs.end() || !it->second || it->second->GetN()==0) continue;
@@ -1104,6 +1108,7 @@ TCanvas* makeCleanResolutionBiasCanvas(const string& particle,
     TLegend* legB = new TLegend(0.37, 0.50, 0.97, 0.95);
     legB->SetBorderSize(1); legB->SetFillColor(kWhite); legB->SetTextSize(0.026);
     for (auto& cv : curves) {
+        if (!gamma && cv.method == 1) continue;  // see resolution pad comment above
         const string key = Form("%s_m%d_w%d", particle.c_str(), cv.method, cv.weight);
         auto it = biasGraphs.find(key);
         if (it == biasGraphs.end() || !it->second || it->second->GetN()==0) continue;
