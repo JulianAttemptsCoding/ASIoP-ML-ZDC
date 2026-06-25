@@ -336,6 +336,40 @@ double applyReco(const EventData& e, int method, const vector<double>& p) {
     return p[0] + p[1]*e.ecal + p[2]*e.hcal + p[3]*e.ecal*e.ecal + p[4]*e.hcal*e.hcal;
 }
 
+// Iterative Gaussian core fit -- the standard calorimetry "core resolution" estimator.
+// Fit a Gaussian, then refit within +/-2 sigma, iterating until the width stabilizes.
+// It converges on the central peak, excludes the tails, and gives ONE consistent
+// estimator at every energy and method. Using it for the graph metric removes the
+// spurious resolution spikes that appear when a per-point estimate switches between a
+// narrow DCB core and a wide robust fallback (the 50 GeV and 150 GeV artifacts).
+bool iterativeGaussianCore(TH1D* h, double seedMu, double seedSig,
+                           double& mu, double& sig, double& muErr, double& sigErr) {
+    if (!h || h->GetEntries() < 30) return false;
+    const double xmin = h->GetXaxis()->GetXmin();
+    const double xmax = h->GetXaxis()->GetXmax();
+    const double bw   = h->GetBinWidth(1);
+    double cMu = seedMu, cSig = TMath::Max(seedSig, 2.0*bw);
+    TF1 g("gcore", "gaus", xmin, xmax);
+    bool ok = false;
+    for (int it = 0; it < 5; ++it) {
+        const double lo = TMath::Max(xmin, cMu - 2.0*cSig);
+        const double hi = TMath::Min(xmax, cMu + 2.0*cSig);
+        if (hi - lo < 3.0*bw) break;
+        g.SetRange(lo, hi);
+        g.SetParameters(h->GetMaximum(), cMu, cSig);
+        const int st = h->Fit(&g, "RQ0L");          // "0" => not stored on histo (no dangling TF1)
+        const double nMu  = g.GetParameter(1);
+        const double nSig = TMath::Abs(g.GetParameter(2));
+        if (st != 0 || !std::isfinite(nMu) || !std::isfinite(nSig) || nSig <= 0.0) break;
+        const bool converged = TMath::Abs(nSig - cSig) < 0.02 * cSig;
+        cMu = nMu; cSig = nSig;
+        mu = cMu; sig = cSig; muErr = g.GetParError(1); sigErr = g.GetParError(2);
+        ok = true;
+        if (converged && it >= 1) break;
+    }
+    return ok && std::isfinite(mu) && std::isfinite(sig) && sig > 0.0;
+}
+
 bool fitRatioDCB(TH1D* h, const vector<double>& ratios,
                  TF1*& fit, double& mu, double& sig, double& muErr, double& sigErr) {
     fit = nullptr;
@@ -348,6 +382,15 @@ bool fitRatioDCB(TH1D* h, const vector<double>& ratios,
     double rMu=0.0, rSig=0.0, rMuErr=0.0, rSigErr=0.0;
     if (!robustCoreStats(ratios, rMu, rSig, rMuErr, rSigErr)) return false;
     mu = rMu; sig = rSig; muErr = rMuErr; sigErr = rSigErr;
+
+    // METRIC (drives the resolution/bias graphs): consistent iterative Gaussian core.
+    // Robust core is the last-resort fallback only if the Gaussian fit fails outright.
+    {
+        double gMu=0, gSig=0, gMuErr=0, gSigErr=0;
+        if (iterativeGaussianCore(h, rMu, rSig, gMu, gSig, gMuErr, gSigErr)) {
+            mu = gMu; sig = gSig; muErr = gMuErr; sigErr = gSigErr;
+        }
+    }
 
     const double xmin = h->GetXaxis()->GetXmin();
     const double xmax = h->GetXaxis()->GetXmax();
@@ -379,18 +422,13 @@ bool fitRatioDCB(TH1D* h, const vector<double>& ratios,
                        fSig > 0.0 && fSig < 0.75 &&
                        TMath::Abs(fMu - rMu) < TMath::Max(0.15, 3.5*rSig) &&
                        fMuErr < 0.10 && fSigErr < 0.10);
-    if (sane) {
-        fit = dcb;
-        mu = fMu; sig = fSig; muErr = fMuErr; sigErr = fSigErr;
-        return true;
-    }
-
-    // DCB did not converge cleanly. Do not keep the bad function; keep the robust
-    // central 2.5-sigma core estimate instead.
-    delete dcb;
-    fit = nullptr;
-    mu = rMu; sig = rSig; muErr = rMuErr; sigErr = rSigErr;
-    return false;
+    // DCB is kept ONLY as the displayed curve on the per-energy histogram (slide 6 and
+    // the QA hist canvases). It does NOT set the graph metric -- that is the iterative
+    // Gaussian core computed above -- so a failed or sub-peak-locked DCB fit can never
+    // create a resolution spike on the graphs.
+    if (sane) { fit = dcb; }
+    else      { delete dcb; fit = nullptr; }
+    return (sig > 0.0);
 }
 
 vector<RecoMetrics> buildRecoMetrics(const vector<Sample>& samples,
@@ -425,8 +463,8 @@ vector<RecoMetrics> buildRecoMetrics(const vector<Sample>& samples,
         TF1* fit = nullptr;
         double mu = 0, sig = 0, muErr = 0, sigErr = 0;
         const bool ok = fitRatioDCB(h, ratios, fit, mu, sig, muErr, sigErr);
-        printf("[METRIC] %-8s E=%8.4f  m%d_w%d  bias=%.5f  reso=%.5f  fit=%s\n",
-               particle.c_str(), s.beamMean, method, weightMode, mu, sig, ok ? "DCB" : "fallback");
+        printf("[METRIC] %-8s E=%8.4f  m%d_w%d  bias=%.5f  reso=%.5f  metric=gcore dcbShown=%s\n",
+               particle.c_str(), s.beamMean, method, weightMode, mu, sig, (ok && fit) ? "yes" : "no");
         metrics.push_back({s.beamMean, sig, sigErr, mu, muErr, h, fit});
     }
     std::sort(metrics.begin(), metrics.end(), [](const RecoMetrics& a, const RecoMetrics& b) { return a.E < b.E; });
@@ -920,7 +958,7 @@ TCanvas* makeCleanResolutionBiasCanvas(const string& particle,
                                         const char* cname) {
     const bool   gamma = (particle == "gamma");
     const double xMax  = gamma ? 42.0 : 320.0;
-    const double rqX0  = gamma ?  0.5 :  10.0;
+    const double rqX0  = gamma ?  1.0 :  10.0;
     const double oldA  = gamma ? 0.35 :  0.50;
     const double newA  = gamma ? 0.20 :  0.35;
 
@@ -955,7 +993,7 @@ TCanvas* makeCleanResolutionBiasCanvas(const string& particle,
     mgR->Draw("AP");
     mgR->GetXaxis()->SetTitle("E_{beam} (GeV)");
     mgR->GetYaxis()->SetTitle("#sigma_{E} / E_{beam}");
-    mgR->GetYaxis()->SetRangeUser(0.0, gamma ? 0.25 : 0.60);
+    mgR->GetYaxis()->SetRangeUser(0.0, 0.30); // match reference slides 7/8
     mgR->GetXaxis()->SetLimits(0.0, xMax);
     mgR->GetXaxis()->SetTitleSize(0.05); mgR->GetYaxis()->SetTitleSize(0.05);
     mgR->GetXaxis()->SetLabelSize(0.043); mgR->GetYaxis()->SetLabelSize(0.043);
@@ -981,7 +1019,7 @@ TCanvas* makeCleanResolutionBiasCanvas(const string& particle,
     mgB->Draw("AP");
     mgB->GetXaxis()->SetTitle("E_{beam} (GeV)");
     mgB->GetYaxis()->SetTitle("E_{rec} / E_{beam}");
-    mgB->GetYaxis()->SetRangeUser(gamma ? 0.75 : 0.3, gamma ? 1.25 : 2.5);
+    mgB->GetYaxis()->SetRangeUser(0.80, gamma ? 1.20 : 1.50); // match reference slides 7/8
     mgB->GetXaxis()->SetLimits(0.0, xMax);
     mgB->GetXaxis()->SetTitleSize(0.05); mgB->GetYaxis()->SetTitleSize(0.05);
     mgB->GetXaxis()->SetLabelSize(0.043); mgB->GetYaxis()->SetLabelSize(0.043);
@@ -1140,15 +1178,18 @@ void zdc_reco_browser(const char* inputDir="data", const char* outDir="plots") {
     // (100 MeV - 40 GeV) so the graph shows the full range including the sub-GeV extrapolation.
     // Neutron: train and evaluate on all available energies.
     {
-        vector<Sample> gammaTrainSamples = filterSamples(gammaSamples, 1.0, 40.0);
+        vector<Sample> gammaTrainSamples = filterSamples(gammaSamples, 0.99, 40.5);
         std::map<string,TGraphErrors*> resClnG, biasClnG, resClnN, biasClnN;
 
         for (int m = 0; m < 3; ++m) {
             for (int w = 0; w < 2; ++w) {
-                if (!gammaTrainSamples.empty() && !gammaSamples.empty()) {
+                if (!gammaTrainSamples.empty()) {
+                    // Reference slide 7 shows 1-40 GeV gamma only. Train and evaluate on the
+                    // same [1,40] window; below 1 GeV the linear regression extrapolates past
+                    // its training floor and the bias fans out unphysically (pure artifact).
                     vector<double> params;
                     fitRegression(gammaTrainSamples, m, w, params);
-                    vector<RecoMetrics> mets = buildRecoMetrics(gammaSamples, params, m, w, "gamma");
+                    vector<RecoMetrics> mets = buildRecoMetrics(gammaTrainSamples, params, m, w, "gamma");
                     const string key = Form("gamma_m%d_w%d", m, w);
                     resClnG[key]  = makeGraph(mets, true,  Form("gR_cln_g_m%d_w%d", m, w));
                     biasClnG[key] = makeGraph(mets, false, Form("gB_cln_g_m%d_w%d", m, w));
