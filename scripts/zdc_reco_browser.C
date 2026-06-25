@@ -216,6 +216,16 @@ bool loadSample(const string& path, const string& particle, Sample& s) {
     s.basename = baseName(path);
     s.events.clear();
 
+    // Read ONLY the seven leaves we use. Without this, GetEntry deserializes the entire
+    // event (hit positions, cell IDs, contributions, ...) from these large hit-level files
+    // -- the dominant cost and the reason a full neutron load took minutes. Disabling the
+    // unused branches makes GetEntry read a tiny fraction of the data.
+    t->SetBranchStatus("*", 0);
+    TLeaf* used[7] = {lEcal, lHcal, lPx, lPy, lPz, lMass, lStat};
+    for (TLeaf* l : used) {
+        if (l && l->GetBranch()) t->SetBranchStatus(l->GetBranch()->GetName(), 1);
+    }
+
     double sumE = 0.0, sumE2 = 0.0;
     Long64_t nValid = 0;
     const Long64_t nEntries = t->GetEntries();
@@ -264,10 +274,75 @@ void mergeSameEnergy(vector<Sample>& samples, const string& particle);
 vector<Sample> filterSamples(const vector<Sample>& samples, double minE, double maxE);
 bool robustCoreStats(vector<double> vals, double& mu, double& sig, double& muErr, double& sigErr);
 
+// Signature of the raw inputs: "basename:size" for each file. Detects added/removed/
+// changed raw files so a stale cache is never used.
+string rawSignature(const vector<string>& files) {
+    string sig;
+    for (const auto& p : files) {
+        FileStat_t st;
+        Long64_t sz = (gSystem->GetPathInfo(p.c_str(), st) == 0) ? st.fSize : -1;
+        sig += baseName(p) + ":" + std::to_string((long long)sz) + ";";
+    }
+    return sig;
+}
+
+// The slow part of this program is reading ~2 GB of raw hit-level ROOT over the (slow)
+// filesystem to extract just three numbers per event (ECAL sum, HCAL sum, beam energy).
+// Cache those triplets so reruns skip the raw read entirely. Delete qa/cache_*.txt (or
+// change the raw files) to force a rebuild.
+bool loadSamplesFromCache(const string& cachePath, const string& sig, vector<Sample>& samples) {
+    FILE* f = fopen(cachePath.c_str(), "r");
+    if (!f) return false;
+    char line[8192];
+    if (!fgets(line, sizeof(line), f)) { fclose(f); return false; }
+    // header line: SIG <signature>
+    string head(line);
+    if (head.rfind("SIG ", 0) != 0) { fclose(f); return false; }
+    string cachedSig = head.substr(4);
+    if (!cachedSig.empty() && cachedSig.back() == '\n') cachedSig.pop_back();
+    if (cachedSig != sig) { fclose(f); return false; }   // raw files changed -> rebuild
+
+    int nSamp = 0;
+    if (fscanf(f, "NSAMP %d\n", &nSamp) != 1) { fclose(f); return false; }
+    samples.clear();
+    for (int i = 0; i < nSamp; ++i) {
+        double bm = 0, br = 0; int nev = 0;
+        if (fscanf(f, "S %lf %lf %d\n", &bm, &br, &nev) != 3) { fclose(f); return false; }
+        Sample s; s.particle = ""; s.beamMean = bm; s.beamRMS = br; s.basename = "cached";
+        s.events.reserve(nev);
+        for (int j = 0; j < nev; ++j) {
+            double ec = 0, hc = 0, be = 0;
+            if (fscanf(f, "%lf %lf %lf\n", &ec, &hc, &be) != 3) { fclose(f); return false; }
+            s.events.push_back({ec, hc, be});
+        }
+        samples.push_back(std::move(s));
+    }
+    fclose(f);
+    printf("[CACHE] loaded %d samples from %s (raw read skipped)\n", (int)samples.size(), cachePath.c_str());
+    return true;
+}
+
+void writeSamplesCache(const string& cachePath, const string& sig, const vector<Sample>& samples) {
+    FILE* f = fopen(cachePath.c_str(), "w");
+    if (!f) { printf("[CACHE] WARN cannot write %s\n", cachePath.c_str()); return; }
+    fprintf(f, "SIG %s\n", sig.c_str());
+    fprintf(f, "NSAMP %d\n", (int)samples.size());
+    for (const auto& s : samples) {
+        fprintf(f, "S %.10g %.10g %d\n", s.beamMean, s.beamRMS, (int)s.events.size());
+        for (const auto& e : s.events) fprintf(f, "%.7g %.7g %.7g\n", e.ecal, e.hcal, e.beam);
+    }
+    fclose(f);
+    printf("[CACHE] wrote %s\n", cachePath.c_str());
+}
+
 void loadAllSamples(const char* inputDir, const string& particle, vector<Sample>& samples) {
     vector<string> files;
     collectFilesRecursive(inputDir, particle, files);
     std::sort(files.begin(), files.end());
+
+    const string cachePath = "qa/cache_" + particle + ".txt";
+    const string sig = rawSignature(files);
+    if (loadSamplesFromCache(cachePath, sig, samples)) return;   // fast path
 
     for (auto& p : files) {
         Sample s;
@@ -277,6 +352,8 @@ void loadAllSamples(const char* inputDir, const string& particle, vector<Sample>
         return a.beamMean < b.beamMean;
     });
     mergeSameEnergy(samples, particle);
+    ensureDir("qa");
+    writeSamplesCache(cachePath, sig, samples);
 }
 
 vector<double> featureVector(const EventData& e, int method) {
@@ -289,9 +366,12 @@ vector<double> featureVector(const EventData& e, int method) {
     return {1.0, e.ecal, e.hcal, e.ecal*e.ecal, e.hcal*e.hcal};
 }
 
-// Reference (Taiwan group res2_1_*) uses a free intercept; its neutron bias is >1 and
-// decreases toward 1 at high energy. Matching that look requires p0 free, so keep it.
-static const bool ZERO_INTERCEPT = false;
+// Force the regression through the origin (p0=0): no energy deposited => E_rec=0.
+// With p0 free, the fit inflates the intercept (to ~43 GeV under sqrt(E) weighting),
+// over-reconstructing low-energy neutrons (bias ~2.9 at 20 GeV). p0=0 removes that
+// floor; the neutron bias then sits near 1 (~0.84-1.10) and -- because the intercept was
+// the real lever -- the weighting choice barely changes the result.
+static const bool ZERO_INTERCEPT = true;
 
 bool fitRegression(const vector<Sample>& samples, int method, int weightMode, vector<double>& params) {
     const int k = (method == 0) ? 3 : (method == 1) ? 4 : 5;
@@ -306,12 +386,9 @@ bool fitRegression(const vector<Sample>& samples, int method, int weightMode, ve
             const double vis = e.ecal + e.hcal;
             if (!std::isfinite(vis) || vis <= 0.0) continue;
             vector<double> x = featureVector(e, method);
-            // weightMode 1 reproduces the reference's second ("sqrt(Ebeam)-weighted") curve.
-            // Matching the archive res2_1_* graphs empirically shows that curve was computed
-            // with 1/E weighting (it down-weights high energy, giving the low neutron bias
-            // ~1.3 at 20 GeV). A literal sqrt(E) weight does the opposite (bias ~2.9). Keep
-            // the reference legend label but use the weighting that reproduces its numbers.
-            const double w = (weightMode == 1) ? 1.0 / e.beam : 1.0;
+            // weightMode 1 = sqrt(Ebeam) weighting (higher-energy events weigh more), as the
+            // legend says. With p0=0 (ZERO_INTERCEPT) the weight has little effect.
+            const double w = (weightMode == 1) ? std::sqrt(e.beam) : 1.0;
             for (int i = 0; i < kk; ++i) {
                 rhs(i) += w * x[i+start] * e.beam;
                 for (int j = 0; j < kk; ++j) normal(i,j) += w * x[i+start] * x[j+start];
@@ -1152,12 +1229,12 @@ void zdc_reco_browser(const char* inputDir="data", const char* outDir="plots") {
     // (100 MeV - 40 GeV) so the graph shows the full range including the sub-GeV extrapolation.
     // Neutron: train and evaluate on all available energies.
     {
-        // Match the reference windows (Taiwan group res2_1_*):
         //   gamma   : 1 - 40 GeV  (sub-GeV excluded: regression extrapolates below 1 GeV)
-        //   neutron : 20 - 300 GeV (10 GeV excluded: response is far too non-linear there;
-        //             the reference graphs are 6 points, 20-300, for exactly this reason)
-        vector<Sample> gammaTrainSamples   = filterSamples(gammaSamples,   0.99, 40.5);
-        vector<Sample> neutronRefSamples   = filterSamples(neutronSamples, 15.0, 320.0);
+        //   neutron : all 7 points, 10 - 300 GeV (10 GeV included). With p0=0 the low-energy
+        //             bias stays near 1, so 10 GeV no longer blows up the way it did with a
+        //             free intercept.
+        vector<Sample> gammaTrainSamples   = filterSamples(gammaSamples, 0.99, 40.5);
+        vector<Sample> neutronRefSamples   = neutronSamples;
         std::map<string,TGraphErrors*> resClnG, biasClnG, resClnN, biasClnN;
         vector<RecoMetrics> gamma1GeVmets;   // kept for the slide-6-style 1 GeV histogram
 

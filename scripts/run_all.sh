@@ -16,9 +16,12 @@ if ! command -v root >/dev/null 2>&1; then
 fi
 
 # Generate the four clean physics graphs (no slides).
-# The trailing '+' compiles the macro with ACLiC (much faster per-event loop over the
-# ~2 GB of raw data; the compiled .so is cached for subsequent runs).
-root -l -b -q 'scripts/zdc_reco_browser.C+("data","plots")'
+# Runs interpreted (no ACLiC '+'). After the first build, qa/cache_*.txt holds the
+# per-event extract, so reruns skip the ~2 GB raw read and finish in seconds -- no
+# compiled .so needed, and it avoids the dlopen-from-/mnt/c crash seen under WSL.
+# To rebuild the cache fast (e.g. raw files changed) use the compiled path with the
+# shared library on a native (ext4) filesystem -- see scripts/run_fast.sh.
+root -l -b -q 'scripts/zdc_reco_browser.C("data","plots")'
 
 echo ""
 echo "Done. 4 graphs (match reference slides 5-8):"

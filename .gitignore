@@ -5,6 +5,9 @@ outfile_*.root
 # Regenerable analysis archive (TBrowser QA file); rebuild with scripts/run_all.sh
 qa/*.root
 
+# Per-event extract cache (rebuilt automatically when raw files change)
+qa/cache_*.txt
+
 # ROOT ACLiC compiled-macro build artifacts
 scripts/*_C.so
 scripts/*_C.d
