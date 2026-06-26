@@ -1257,7 +1257,20 @@ void zdc_reco_browser(const char* inputDir="data", const char* outDir="plots") {
                 if (!neutronRefSamples.empty()) {
                     vector<double> params;
                     fitRegression(neutronRefSamples, m, w, params);
-                    vector<RecoMetrics> mets = buildRecoMetrics(neutronRefSamples, params, m, w, "neutron");
+                    // Quadratic (m2) with ZERO_INTERCEPT is ill-conditioned at low E:
+                    // ecal² spans 0.001-20 GeV² across the training range, so the SVD is
+                    // dominated by 100-300 GeV events where quadratic terms are large.
+                    // Applied at 10-20 GeV the quadratic extrapolates badly → resolution
+                    // spike and non-monotonic bias hump at 50 GeV.
+                    // Train on all 7 points for best parameter estimation, evaluate only
+                    // where the model is valid (linear: 10-300 GeV, quadratic: ≥50 GeV).
+                    vector<RecoMetrics> mets;
+                    if (m == 2) {
+                        vector<Sample> evalS = filterSamples(neutronRefSamples, 49.0, 310.0);
+                        mets = buildRecoMetrics(evalS, params, m, w, "neutron");
+                    } else {
+                        mets = buildRecoMetrics(neutronRefSamples, params, m, w, "neutron");
+                    }
                     const string key = Form("neutron_m%d_w%d", m, w);
                     resClnN[key]  = makeGraph(mets, true,  Form("gR_cln_n_m%d_w%d", m, w));
                     biasClnN[key] = makeGraph(mets, false, Form("gB_cln_n_m%d_w%d", m, w));
